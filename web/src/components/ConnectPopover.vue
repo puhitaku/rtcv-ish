@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import FilePicker from './ui/FilePicker.vue'
 import { act } from '@/stores/log'
 import { useStatusStore } from '@/stores/status'
 import { loadJSON, save } from '@/lib/storage'
@@ -12,6 +13,21 @@ const saved = loadJSON(KEY, { address: '127.0.0.1:42069', rom: '' })
 const address = ref(saved.address)
 const rom = ref(saved.rom)
 const busy = ref(false)
+const picking = ref(false)
+
+/** Why Load ROM is disabled, or '' when it is available. */
+const loadReason = computed(() => {
+  if (st.needEmu) return `${st.needEmu}: connect or launch an emulator first`
+  if (!rom.value) return 'Enter a ROM path or use Browse…'
+  if (busy.value) return 'Busy'
+  return ''
+})
+
+function picked(path: string) {
+  rom.value = path
+  picking.value = false
+  remember()
+}
 
 function remember() {
   save(KEY, { address: address.value, rom: rom.value })
@@ -97,16 +113,20 @@ onMounted(() => void act(() => st.fetchEmulators()))
           placeholder="/path/to/game.nds"
           data-testid="rom-path"
         />
+        <button type="button" class="btn" data-testid="rom-browse" @click="picking = true">
+          Browse…
+        </button>
         <button
           class="btn btn-accent"
           type="submit"
-          :disabled="busy || !st.connected || !rom"
-          :title="st.needEmu"
+          :disabled="!!loadReason"
+          :title="loadReason"
           data-testid="rom-load"
         >
           Load ROM
         </button>
       </form>
+      <FilePicker v-if="picking" @select="picked" @close="picking = false" />
     </section>
 
     <section class="flex flex-wrap gap-1">

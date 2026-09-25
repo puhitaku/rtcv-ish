@@ -32,7 +32,8 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 ```
 
 - Top bar: connection status (with a Connect/Launch popover: address
-  field, bundled emulator list, ROM path), game name and frame counter,
+  field, bundled emulator list, ROM path with a Browse… picker that lists
+  core-host directories via `/api/browse`), game name and frame counter,
   the two global actions Manual Blast and Auto-Corrupt toggle, theme
   toggle. Game Protection: toggle + Back + Now.
 - Left sidebar switches panels. Panels mirror RTCV grids.

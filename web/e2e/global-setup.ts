@@ -1,13 +1,15 @@
 // Builds the frontend and the Go binaries, then starts an emulator and
 // rtcv-ish (with the frontend embedded) on free ports. The emulator is
 // rtcv-ish-fakeemu by default, or a real melonDS when RTCVISH_MELONDS is set
-// (see README.md). Tests read E2E_BASE_URL, E2E_EMU_ADDR, E2E_ROM and
-// E2E_REAL_EMU.
+// (see README.md). Tests read E2E_BASE_URL, E2E_EMU_ADDR, E2E_ROM (with
+// E2E_ROM_DIR and E2E_ROM_NAME, its parts for the file picker) and
+// E2E_REAL_EMU. With the fake emulator, E2E_ROM is an empty test.nds in a
+// temporary directory.
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 const webDir = resolve(import.meta.dirname, '..')
 const repoRoot = resolve(webDir, '..')
@@ -100,19 +102,28 @@ function melonDSPath(): string | undefined {
 
 export default async function globalSetup() {
   const melonDS = melonDSPath()
-  const rom = melonDS
-    ? resolve(process.env.RTCVISH_ROM || join(repoRoot, 'test', 'roms', 'hello_world.nds'))
-    : '/roms/e2e.nds'
-  if (melonDS && !existsSync(rom)) {
+  const realRom =
+    melonDS && resolve(process.env.RTCVISH_ROM || join(repoRoot, 'test', 'roms', 'hello_world.nds'))
+  if (realRom && !existsSync(realRom)) {
     throw new Error(
       process.env.RTCVISH_ROM
-        ? `RTCVISH_ROM: ${rom} does not exist`
-        : `test ROM ${rom} is missing; run scripts/build-nds-examples.sh to build the test ROMs (or set RTCVISH_ROM)`,
+        ? `RTCVISH_ROM: ${realRom} does not exist`
+        : `test ROM ${realRom} is missing; run scripts/build-nds-examples.sh to build the test ROMs (or set RTCVISH_ROM)`,
     )
   }
 
   const tmp = mkdtempSync(join(tmpdir(), 'rtcvish-e2e-'))
   const bin = join(tmp, 'bin')
+
+  let rom: string
+  if (realRom) {
+    rom = realRom
+  } else {
+    // The ROM picker lists files on the core host, so the fake ROM exists.
+    rom = join(tmp, 'roms', 'test.nds')
+    mkdirSync(dirname(rom))
+    writeFileSync(rom, '')
+  }
 
   if (!process.env.E2E_SKIP_WEB_BUILD) {
     execFileSync('npx', ['vite', 'build'], { cwd: webDir, stdio: 'inherit' })
@@ -184,6 +195,8 @@ export default async function globalSetup() {
   process.env.E2E_BASE_URL = base
   process.env.E2E_EMU_ADDR = emuAddr
   process.env.E2E_ROM = rom
+  process.env.E2E_ROM_DIR = dirname(rom)
+  process.env.E2E_ROM_NAME = basename(rom)
   if (melonDS) process.env.E2E_REAL_EMU = '1'
 
   return async () => {

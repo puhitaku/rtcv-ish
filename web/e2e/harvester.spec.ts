@@ -18,7 +18,19 @@ test('connect, blast, harvest, edit and export', async ({ page }) => {
   await tid(page, 'connect-address').fill(emuAddr())
   await tid(page, 'connect-button').click()
   await expect(tid(page, 'emulator-label')).not.toHaveText('disconnected')
-  await tid(page, 'rom-path').fill(rom())
+  // Pick the ROM with the host file picker.
+  await tid(page, 'rom-browse').click()
+  await expect(tid(page, 'file-picker')).toBeVisible()
+  await tid(page, 'picker-path').fill(process.env.E2E_ROM_DIR!)
+  await tid(page, 'picker-go').click()
+  await expect(tid(page, 'picker-path')).toHaveValue(process.env.E2E_ROM_DIR!)
+  await expect(tid(page, 'picker-parent')).toBeVisible()
+  await page
+    .locator(`[data-testid="picker-file"][data-name="${process.env.E2E_ROM_NAME!}"]`)
+    .click()
+  await expect(tid(page, 'file-picker')).toHaveCount(0)
+  await expect(tid(page, 'rom-path')).toHaveValue(rom())
+  await expect(tid(page, 'rom-load')).toBeEnabled()
   await tid(page, 'rom-load').click()
   await expect(tid(page, 'game-title')).not.toHaveText('no ROM', {
     timeout: realEmu ? 30_000 : undefined,

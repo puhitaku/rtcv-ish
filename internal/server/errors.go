@@ -19,6 +19,7 @@ const (
 	CodeInvalidArgument      = "INVALID_ARGUMENT"
 	CodeOutOfRange           = "OUT_OF_RANGE"
 	CodeNotFound             = "NOT_FOUND"
+	CodePermissionDenied     = "PERMISSION_DENIED"
 	CodeNoROM                = "NO_ROM"
 	CodeBusy                 = "BUSY"
 	CodeUnsupported          = "UNSUPPORTED"

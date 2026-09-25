@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 export interface Call {
   method: string
   path: string
+  query: Record<string, string>
   body: unknown
 }
 
@@ -24,7 +25,12 @@ export function mockFetch(routes: Record<string, Handler | object>) {
     } catch {
       body = text
     }
-    const call = { method: req.method, path: url.pathname, body }
+    const call = {
+      method: req.method,
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      body,
+    }
     calls.push(call)
     const h = routes[`${req.method} ${url.pathname}`]
     if (h === undefined) {

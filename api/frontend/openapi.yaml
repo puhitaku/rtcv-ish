@@ -13,6 +13,7 @@ info:
     |---|---|---|
     | `INVALID_ARGUMENT` | 400 | Bad request body, parameter or value (also emulator `INVALID_ARGUMENT`). |
     | `OUT_OF_RANGE` | 400 | Address/size outside a domain (emulator `OUT_OF_RANGE`). |
+    | `PERMISSION_DENIED` | 403 | The core cannot read a host path. |
     | `NOT_FOUND` | 404 | Unknown domain, stash key, slot content, list, ROM path, bundled emulator. |
     | `NO_ROM` | 409 | The emulator has no ROM loaded. |
     | `BUSY` | 409 | The emulator is busy. |
@@ -42,6 +43,7 @@ tags:
   - name: stockpile
   - name: protection
   - name: lists
+  - name: browse
   - name: events
 
 paths:
@@ -877,6 +879,33 @@ paths:
         "204": { description: Loaded. }
         default: { $ref: "#/components/responses/Error" }
 
+  /browse:
+    get:
+      operationId: browse
+      tags: [browse]
+      description: |
+        List a directory on the core host for the ROM picker: directories
+        first, then files with an extension melonDS opens (`.nds`, `.srl`,
+        `.dsi`, `.ids`, those plus `.zst`, and archives), each group sorted
+        case-insensitively. Hidden (dot-prefixed) entries are omitted.
+        Without `path`, lists the user's home directory (or the data
+        directory). On Windows, a drive root lists the other drives as
+        directory entries. 400 `INVALID_ARGUMENT` when `path` is not a
+        directory, 404 `NOT_FOUND` when it does not exist, 403
+        `PERMISSION_DENIED` when it cannot be read.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Directory listing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DirListing" }
+        default: { $ref: "#/components/responses/Error" }
+
   /lists:
     get:
       operationId: listLists
@@ -1038,6 +1067,27 @@ components:
         title: { type: string }
         code: { type: string }
         console: { type: string }
+
+    DirListing:
+      type: object
+      required: [path, parent, entries]
+      properties:
+        path: { type: string, description: "Absolute, cleaned path of the listed directory." }
+        parent:
+          type: [string, "null"]
+          description: Absolute path of the parent directory; null at a filesystem root.
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/DirEntry" }
+
+    DirEntry:
+      type: object
+      required: [name, path, dir, size]
+      properties:
+        name: { type: string }
+        path: { type: string, description: Absolute path of the entry. }
+        dir: { type: boolean }
+        size: { type: integer, format: int64, description: "File size in bytes; 0 for directories." }
 
     BundledEmulator:
       type: object

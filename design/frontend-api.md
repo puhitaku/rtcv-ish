@@ -38,6 +38,7 @@ in the spec.
 | POST | `/api/emulator/step` | `{frames}` |
 | POST | `/api/emulator/quit` | |
 | GET | `/api/emulator/screenshot` | PNG of all screens stacked vertically. |
+| GET | `/api/browse?path=` | ROM picker: `{path, parent (null at a root), entries: [{name, path, dir, size}]}` for a core-host directory; directories then ROM-like files (melonDS extensions), hidden entries omitted. Default: home dir, else data dir. 400 not a directory, 404 missing, 403 `PERMISSION_DENIED`. On Windows a drive root also lists the other drives. |
 
 ### Memory domains and memory
 

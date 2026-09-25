@@ -833,6 +833,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description List a directory on the core host for the ROM picker: directories
+         *     first, then files with an extension melonDS opens (`.nds`, `.srl`,
+         *     `.dsi`, `.ids`, those plus `.zst`, and archives), each group sorted
+         *     case-insensitively. Hidden (dot-prefixed) entries are omitted.
+         *     Without `path`, lists the user's home directory (or the data
+         *     directory). On Windows, a drive root lists the other drives as
+         *     directory entries. 400 `INVALID_ARGUMENT` when `path` is not a
+         *     directory, 404 `NOT_FOUND` when it does not exist, 403
+         *     `PERMISSION_DENIED` when it cannot be read.
+         */
+        get: operations["browse"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lists": {
         parameters: {
             query?: never;
@@ -958,6 +985,24 @@ export interface components {
             title: string;
             code: string;
             console: string;
+        };
+        DirListing: {
+            /** @description Absolute, cleaned path of the listed directory. */
+            path: string;
+            /** @description Absolute path of the parent directory; null at a filesystem root. */
+            parent: string | null;
+            entries: components["schemas"]["DirEntry"][];
+        };
+        DirEntry: {
+            name: string;
+            /** @description Absolute path of the entry. */
+            path: string;
+            dir: boolean;
+            /**
+             * Format: int64
+             * @description File size in bytes; 0 for directories.
+             */
+            size: number;
         };
         BundledEmulator: {
             name: string;
@@ -2730,6 +2775,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    browse: {
+        parameters: {
+            query?: {
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Directory listing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirListing"];
+                };
             };
             default: components["responses"]["Error"];
         };
