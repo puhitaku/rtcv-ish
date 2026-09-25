@@ -1,0 +1,292 @@
+// Emulator API: the wire contract between the rtcv-ish core and an emulator.
+//
+// Transport: one TCP connection. Every message is framed as a 4-byte
+// little-endian length followed by one serialized Message. The core sends
+// Request messages; the emulator answers each with exactly one Response
+// carrying the same id, and may send Event messages at any time.
+//
+// See design/emulator-api.md for the semantics of every operation.
+
+syntax = "proto3";
+
+package rtcvish.emulator.v1;
+
+option go_package = "github.com/puhitaku/rtcv-ish/api/emulator/v1;emulatorv1";
+
+message Message {
+  oneof body {
+    Request request = 1;
+    Response response = 2;
+    Event event = 3;
+  }
+}
+
+message Request {
+  uint32 id = 1;
+  oneof body {
+    HelloRequest hello = 10;
+    GetStatusRequest get_status = 11;
+    ListDomainsRequest list_domains = 12;
+    ReadRequest read = 13;
+    WriteRequest write = 14;
+    SaveStateRequest save_state = 15;
+    LoadStateRequest load_state = 16;
+    LoadRomRequest load_rom = 17;
+    CloseRomRequest close_rom = 18;
+    ResetRequest reset = 19;
+    PauseRequest pause = 20;
+    ResumeRequest resume = 21;
+    StepRequest step = 22;
+    ApplyUnitsRequest apply_units = 23;
+    RemoveUnitsRequest remove_units = 24;
+    ClearUnitsRequest clear_units = 25;
+    ListUnitsRequest list_units = 26;
+    SetInputRequest set_input = 27;
+    ScreenshotRequest screenshot = 28;
+    SubscribeRequest subscribe = 29;
+    PingRequest ping = 30;
+    QuitRequest quit = 31;
+  }
+}
+
+message Response {
+  uint32 id = 1;
+  oneof body {
+    Error error = 2;
+    HelloResponse hello = 10;
+    GetStatusResponse get_status = 11;
+    ListDomainsResponse list_domains = 12;
+    ReadResponse read = 13;
+    WriteResponse write = 14;
+    SaveStateResponse save_state = 15;
+    LoadStateResponse load_state = 16;
+    LoadRomResponse load_rom = 17;
+    CloseRomResponse close_rom = 18;
+    ResetResponse reset = 19;
+    PauseResponse pause = 20;
+    ResumeResponse resume = 21;
+    StepResponse step = 22;
+    ApplyUnitsResponse apply_units = 23;
+    RemoveUnitsResponse remove_units = 24;
+    ClearUnitsResponse clear_units = 25;
+    ListUnitsResponse list_units = 26;
+    SetInputResponse set_input = 27;
+    ScreenshotResponse screenshot = 28;
+    SubscribeResponse subscribe = 29;
+    PingResponse ping = 30;
+    QuitResponse quit = 31;
+  }
+}
+
+message Event {
+  oneof body {
+    FrameEvent frame = 1;
+    StatusEvent status = 2;
+  }
+}
+
+message Error {
+  enum Code {
+    UNKNOWN = 0;
+    INVALID_ARGUMENT = 1;
+    NOT_FOUND = 2;
+    OUT_OF_RANGE = 3;
+    NO_ROM = 4;
+    UNSUPPORTED = 5;
+    FAILED = 6;
+    BUSY = 7;
+  }
+  Code code = 1;
+  string message = 2;
+}
+
+// Handshake. Must be the first request on a connection.
+message HelloRequest {
+  uint32 protocol_version = 1;
+  string client_name = 2;
+}
+
+message HelloResponse {
+  uint32 protocol_version = 1;
+  string emulator = 2;  // e.g. "melonDS"
+  string version = 3;   // emulator version string
+  string system = 4;    // e.g. "nds"
+  Capabilities capabilities = 5;
+}
+
+message Capabilities {
+  bool savestates = 1;
+  bool screenshot = 2;
+  bool input = 3;
+  bool load_rom = 4;
+  bool reset = 5;
+  // Largest read/write/savestate payload the emulator accepts in one message.
+  uint32 max_payload = 6;
+}
+
+message Status {
+  enum State {
+    NO_ROM = 0;
+    RUNNING = 1;
+    PAUSED = 2;
+  }
+  State state = 1;
+  // Frames emulated since the ROM was loaded. Monotonic; savestate loads
+  // do not rewind it.
+  uint64 frame = 2;
+  string rom_path = 3;
+  string game_title = 4;
+  string game_code = 5;
+  string console = 6;  // e.g. "DS", "DSi"
+}
+
+message GetStatusRequest {}
+message GetStatusResponse { Status status = 1; }
+
+message Domain {
+  string name = 1;
+  uint64 size = 2;
+  uint32 word_size = 3;
+  bool big_endian = 4;
+  bool writable = 5;
+  // True for domains RTCV blacklisted by default (not selected for
+  // corruption unless the user opts in).
+  bool hidden = 6;
+}
+
+message ListDomainsRequest {}
+message ListDomainsResponse { repeated Domain domains = 1; }
+
+message Range {
+  string domain = 1;
+  uint64 address = 2;
+  uint32 size = 3;
+}
+
+message ReadRequest { repeated Range ranges = 1; }
+// One entry per requested range, in order.
+message ReadResponse { repeated bytes data = 1; }
+
+message WriteChunk {
+  string domain = 1;
+  uint64 address = 2;
+  bytes data = 3;
+}
+
+message WriteRequest { repeated WriteChunk chunks = 1; }
+message WriteResponse {}
+
+message SaveStateRequest {}
+message SaveStateResponse { bytes data = 1; }
+
+message LoadStateRequest { bytes data = 1; }
+message LoadStateResponse {}
+
+// Path on the emulator host. The response is sent after the ROM is
+// loaded and emulation has started (or failed).
+message LoadRomRequest { string path = 1; }
+message LoadRomResponse { Status status = 1; }
+
+message CloseRomRequest {}
+message CloseRomResponse {}
+
+message ResetRequest {}
+message ResetResponse {}
+
+message PauseRequest {}
+message PauseResponse {}
+
+message ResumeRequest {}
+message ResumeResponse {}
+
+// Emulate exactly `frames` frames and stay paused afterwards. If the
+// emulator is running it pauses first. The response is sent after the
+// last frame has been emulated.
+message StepRequest { uint32 frames = 1; }
+message StepResponse { uint64 frame = 1; }
+
+// A unit is a memory write the emulator performs on its own at frame
+// boundaries. Units are executed in the order they were applied, before
+// each frame is emulated.
+message Unit {
+  uint64 id = 1;
+  string domain = 2;
+  uint64 address = 3;
+  uint32 size = 4;
+  oneof source {
+    // Bytes written as-is.
+    bytes value = 5;
+    // Bytes read from another location.
+    StoreSource store = 6;
+  }
+  // Added to the sampled value of a store unit before writing, with
+  // wrap-around integer arithmetic on the unit's size (1, 2, 4 or 8 bytes)
+  // and the domain's endianness. Ignored for value units.
+  sint64 tilt = 7;
+  // Frames to wait after apply (or after each loop) before executing.
+  uint32 delay = 8;
+  // Number of frames the unit executes. 0 means forever.
+  uint32 lifetime = 9;
+  // Re-schedule the unit after its lifetime ends, waiting loop_delay
+  // frames (or delay, if loop_delay is 0).
+  bool loop = 10;
+  uint32 loop_delay = 11;
+}
+
+message StoreSource {
+  string domain = 1;
+  uint64 address = 2;
+  // false: sample once, on the first frame the unit executes.
+  // true: sample every frame the unit executes.
+  bool continuous = 3;
+}
+
+message ApplyUnitsRequest { repeated Unit units = 1; }
+message ApplyUnitsResponse {}
+
+message RemoveUnitsRequest { repeated uint64 ids = 1; }
+message RemoveUnitsResponse {}
+
+message ClearUnitsRequest {}
+message ClearUnitsResponse {}
+
+message ListUnitsRequest {}
+message ListUnitsResponse {
+  // Units that are queued or executing.
+  repeated Unit units = 1;
+}
+
+// Override controller input. Pressed buttons are OR-ed with the user's
+// input until cleared. Button bit assignments are emulator-specific and
+// documented per emulator.
+message SetInputRequest {
+  uint32 buttons = 1;
+  bool touch = 2;
+  uint32 touch_x = 3;
+  uint32 touch_y = 4;
+  bool clear = 5;
+}
+message SetInputResponse {}
+
+message Image {
+  uint32 width = 1;
+  uint32 height = 2;
+  bytes rgba = 3;
+}
+
+message ScreenshotRequest {}
+message ScreenshotResponse { repeated Image screens = 1; }
+
+// Ask for FrameEvent every `frame_interval` frames (0 disables).
+message SubscribeRequest { uint32 frame_interval = 1; }
+message SubscribeResponse {}
+
+message PingRequest {}
+message PingResponse {}
+
+// Close the emulator process.
+message QuitRequest {}
+message QuitResponse {}
+
+message FrameEvent { uint64 frame = 1; }
+message StatusEvent { Status status = 1; }
