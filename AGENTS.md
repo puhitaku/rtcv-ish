@@ -6,8 +6,11 @@ Read `design/architecture.md` first; other design docs are in `design/`.
 
 ## Map
 
-- `cmd/rtcv-ish` core executable. `internal/*` core packages (see
-  `design/architecture.md` for what each does).
+- `cmd/rtcv-ish` core executable, `cmd/rtcv-ish-fakeemu` fake emulator.
+  `internal/*` core packages (see `design/architecture.md`): `emu` client,
+  `emu/fake`, `corrupt` engines, `stockpile` storage, `session`
+  coordinator, `server` HTTP + generated `gen/`, `webui` embedded frontend
+  (build tag `embedweb`).
 - `api/emulator/v1/emulator.proto` emulator API (semantics in
   `design/emulator-api.md`). `api/frontend/openapi.yaml` frontend API.
 - `sdk/cpp` C++ emulator SDK, copied verbatim into emulator forks.
@@ -36,3 +39,7 @@ Read `design/architecture.md` first; other design docs are in `design/`.
   submodule pointer here.
 - UI: simple, flat, no gradients, light/dark follows the OS.
 - Generated code is committed. Regenerate with `scripts/gen.sh`.
+- `make build` builds `web/` then the core with `-tags embedweb`;
+  `make build-noweb` skips the frontend. `make test` runs Go tests;
+  `make test-e2e` needs `RTCVISH_MELONDS`. Frontend: `cd web && npm test`,
+  `npm run test:e2e`.
