@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ConnectPopover from './ConnectPopover.vue'
-import { act } from '@/stores/log'
+import { useGlobalActions, withKeyHint as hint } from '@/lib/shortcuts'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
-import { useUnitsStore } from '@/stores/units'
 
 const st = useStatusStore()
 const settings = useSettingsStore()
 const ui = useUiStore()
-const units = useUnitsStore()
+const actions = useGlobalActions()
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -79,20 +78,24 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
 
     <button
       class="btn btn-accent"
-      :disabled="!!st.needRom"
-      :title="st.needRom || 'Generate with the current settings and apply'"
+      :disabled="!!actions.blast.disabled.value"
+      :title="
+        actions.blast.disabled.value ||
+        hint('blast', 'Generate with the current settings and apply')
+      "
       data-testid="manual-blast"
-      @click="act(() => units.blast())"
+      @click="actions.blast.run()"
     >
       Manual Blast
     </button>
     <button
       class="btn"
       :class="{ 'btn-on': autoCorrupt }"
-      :disabled="!settings.settings"
+      :disabled="!!actions.autoCorrupt.disabled.value"
+      :title="actions.autoCorrupt.disabled.value || hint('autoCorrupt', 'Toggle Auto-Corrupt')"
       data-testid="auto-corrupt"
       :aria-pressed="autoCorrupt"
-      @click="act(() => settings.patch({ autoCorrupt: !autoCorrupt }))"
+      @click="actions.autoCorrupt.run()"
     >
       Auto-Corrupt: {{ autoCorrupt ? 'ON' : 'OFF' }}
     </button>
@@ -101,46 +104,45 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
       <button
         class="btn"
         :class="{ 'btn-on': protection }"
-        :disabled="!settings.settings"
+        :disabled="!!actions.protection.disabled.value"
+        :title="actions.protection.disabled.value || hint('protection', 'Toggle Game Protection')"
         :aria-pressed="protection"
         data-testid="protection-toggle"
-        @click="act(() => settings.patch({ gameProtection: { enabled: !protection } }))"
+        @click="actions.protection.run()"
       >
         Game Protection: {{ protection ? 'ON' : 'OFF' }}
       </button>
       <button
         class="btn"
-        :disabled="!!st.needRom || !st.status?.protectionBackups"
+        :disabled="!!actions.protectionBack.disabled.value"
         :title="
-          st.needRom ||
-          (!st.status?.protectionBackups ? 'No backups yet' : 'Load the previous backup')
+          actions.protectionBack.disabled.value ||
+          hint('protectionBack', 'Load the previous backup')
         "
         data-testid="protection-back"
-        @click="act(() => st.protectionBack(), 'game protection: back')"
+        @click="actions.protectionBack.run()"
       >
         Back
         <span class="font-mono text-dim">{{ st.status?.protectionBackups ?? 0 }}</span>
       </button>
       <button
         class="btn"
-        :disabled="!!st.needRom || !st.status?.protectionBackups"
+        :disabled="!!actions.protectionLast.disabled.value"
         :title="
-          st.needRom ||
-          (!st.status?.protectionBackups
-            ? 'No backups yet'
-            : 'Load the most recent backup and keep it')
+          actions.protectionLast.disabled.value ||
+          hint('protectionLast', 'Load the most recent backup and keep it')
         "
         data-testid="protection-last"
-        @click="act(() => st.protectionLast(), 'game protection: loaded last backup')"
+        @click="actions.protectionLast.run()"
       >
         Last
       </button>
       <button
         class="btn"
-        :disabled="!!st.needRom"
-        :title="st.needRom || 'Take a backup now'"
+        :disabled="!!actions.protectionNow.disabled.value"
+        :title="actions.protectionNow.disabled.value || hint('protectionNow', 'Take a backup now')"
         data-testid="protection-now"
-        @click="act(() => st.protectionNow(), 'game protection: backup taken')"
+        @click="actions.protectionNow.run()"
       >
         Now
       </button>

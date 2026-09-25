@@ -11,10 +11,12 @@ import HarvesterPanel from './components/panels/HarvesterPanel.vue'
 import BlastEditorPanel from './components/panels/BlastEditorPanel.vue'
 import MemoryPanel from './components/panels/MemoryPanel.vue'
 import SettingsPanel from './components/panels/SettingsPanel.vue'
+import { useShortcuts } from './lib/shortcuts'
 import { refetchAll, startEvents } from './stores/events'
 import { useUiStore } from './stores/ui'
 
 const ui = useUiStore()
+useShortcuts()
 let stop: (() => void) | undefined
 
 onMounted(() => {

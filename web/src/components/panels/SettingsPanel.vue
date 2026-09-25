@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
 import NumField from '@/components/ui/NumField.vue'
+import { SHORTCUTS } from '@/lib/shortcuts'
 import { useSettingsPatch } from '@/components/engine/useSettingsPatch'
 import { useListsStore } from '@/stores/lists'
 import { act } from '@/stores/log'
@@ -163,6 +164,18 @@ function chk(e: Event) {
           </tr>
         </tbody>
       </table>
+    </BoxPanel>
+
+    <BoxPanel title="Shortcuts">
+      <dl class="grid grid-cols-[2rem_1fr] gap-x-2 gap-y-0.5" data-testid="shortcut-list">
+        <template v-for="s in SHORTCUTS" :key="s.key">
+          <dt>
+            <kbd class="font-mono text-accent">{{ s.key }}</kbd>
+          </dt>
+          <dd>{{ s.label }}</dd>
+        </template>
+      </dl>
+      <p class="text-dim">Ignored while typing in a field or when a dialog is open.</p>
     </BoxPanel>
 
     <BoxPanel title="About">
