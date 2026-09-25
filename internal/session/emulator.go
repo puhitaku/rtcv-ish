@@ -660,6 +660,61 @@ func (s *Session) ReadMemory(ctx context.Context, domain string, addr uint64, si
 	return c.ReadOne(ctx, domain, addr, uint32(size))
 }
 
+// wordBatch is the largest single emulator read ReadWords issues.
+const wordBatch = 1 << 20
+
+// ReadWords reads size bytes at addr and returns every stride-th
+// little-endian 16-bit word, in memory order. A trailing odd byte is
+// ignored. The range is read in batches of at most wordBatch bytes.
+func (s *Session) ReadWords(ctx context.Context, domain string, addr uint64, size, stride int) ([]byte, error) {
+	s.mu.Lock()
+	c, err := s.clientLocked()
+	var dsize uint64
+	found := false
+	for _, d := range s.domains {
+		if d.Name == domain {
+			dsize, found = d.Size, true
+		}
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errorf(KindNotFound, "unknown domain %q", domain)
+	}
+	if addr > dsize || uint64(size) > dsize-addr {
+		return nil, errorf(KindOutOfRange, "range %#x+%#x is outside %s (%#x bytes)", addr, size, domain, dsize)
+	}
+	step := 2 * stride
+	batch := wordBatch
+	if mp := int(c.Info().GetCapabilities().GetMaxPayload()); mp > 0 && mp < batch {
+		batch = mp
+	}
+	batch = max(batch-batch%step, step)
+	words := (size/2 + stride - 1) / stride
+	out := make([]byte, 0, 2*words)
+	for off := 0; len(out) < 2*words; off += batch {
+		// Read only up to the end of the last sampled word in this batch.
+		n := min(batch, size-off)
+		n = min(n, (n-2)/step*step+2)
+		b, err := s.readBatch(ctx, c, domain, addr+uint64(off), n)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i+2 <= len(b); i += step {
+			out = append(out, b[i], b[i+1])
+		}
+	}
+	return out, nil
+}
+
+func (s *Session) readBatch(ctx context.Context, c *emu.Client, domain string, addr uint64, n int) ([]byte, error) {
+	ctx, cancel := s.opCtx(ctx)
+	defer cancel()
+	return c.ReadOne(ctx, domain, addr, uint32(n))
+}
+
 func (s *Session) WriteMemory(ctx context.Context, domain string, addr uint64, data []byte) error {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()

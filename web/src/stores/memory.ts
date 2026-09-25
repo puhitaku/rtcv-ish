@@ -1,10 +1,24 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { Layer } from '@/api/types'
 import { readMemory, writeMemory } from '@/api/memory'
 import { hexToBytes } from '@/lib/hex'
 import { newUnit } from '@/lib/layer'
+import { loadJSON, save } from '@/lib/storage'
+import { useDomainsStore } from './domains'
 import { useUnitsStore } from './units'
+
+/** Hex view rows are this many bytes; jumps align to a row. */
+export const ROW = 16
+
+const BITMAPS_KEY = 'rtcvish.memoryBitmaps'
+
+export interface BitmapPrefs {
+  /** Domain name -> collapsed. Hidden domains start collapsed. */
+  collapsed: Record<string, boolean>
+  /** Domain name -> stride override; absent means auto. */
+  stride: Record<string, number>
+}
 
 export interface Freeze {
   domain: string
@@ -36,6 +50,26 @@ export const useMemoryStore = defineStore('memory', () => {
   const address = ref(0)
   const data = ref<Uint8Array>(new Uint8Array())
   const freezes = ref<Freeze[]>([])
+  /** Exact byte of the last jump; `seq` changes on every jump. */
+  const focus = ref<{ address: number; seq: number } | null>(null)
+
+  const bitmaps = ref(loadJSON<BitmapPrefs>(BITMAPS_KEY, { collapsed: {}, stride: {} }))
+  watch(bitmaps, (v) => save(BITMAPS_KEY, v), { deep: true })
+
+  function setDomain(d: string) {
+    domain.value = d
+    address.value = 0
+    data.value = new Uint8Array()
+  }
+
+  /** Shows `addr` of domain `d` in the hex view (row-aligned, clamped to the domain). */
+  function jump(d: string, addr: number) {
+    if (d !== domain.value) setDomain(d)
+    const size = useDomainsStore().byName(d)?.size
+    const a = size ? Math.min(Math.max(0, addr), size - 1) : Math.max(0, addr)
+    address.value = a - (a % ROW)
+    focus.value = { address: a, seq: (focus.value?.seq ?? 0) + 1 }
+  }
 
   async function read(size: number) {
     if (!domain.value) return
@@ -77,5 +111,19 @@ export const useMemoryStore = defineStore('memory', () => {
     freezes.value = rest
   }
 
-  return { domain, address, data, freezes, read, write, frozenAt, freeze, unfreeze }
+  return {
+    domain,
+    address,
+    data,
+    freezes,
+    focus,
+    bitmaps,
+    setDomain,
+    jump,
+    read,
+    write,
+    frozenAt,
+    freeze,
+    unfreeze,
+  }
 })

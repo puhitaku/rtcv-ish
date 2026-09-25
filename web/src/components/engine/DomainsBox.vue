@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import BoxPanel from '@/components/ui/BoxPanel.vue'
+import { byteSize as size } from '@/lib/bitmap'
 import { useDomainsStore } from '@/stores/domains'
 import { act } from '@/stores/log'
 import { useStatusStore } from '@/stores/status'
 
 const domains = useDomainsStore()
 const st = useStatusStore()
-
-function size(n: number) {
-  if (n >= 1 << 20 && n % (1 << 20) === 0) return `${n >> 20} MiB`
-  if (n >= 1 << 10 && n % (1 << 10) === 0) return `${n >> 10} KiB`
-  return `${n} B`
-}
 </script>
 
 <template>

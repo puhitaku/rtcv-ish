@@ -294,6 +294,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/{domain}/words": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain: components["parameters"]["DomainName"];
+            };
+            cookie?: never;
+        };
+        /**
+         * @description Raw 16-bit words for the memory visualizer. Returns every
+         *     `stride`-th little-endian word of `[address, address+size)`, in
+         *     memory order and byte order: word i is the 2 bytes at
+         *     `address + 2*stride*i`. The response has
+         *     `2*ceil(floor(size/2)/stride)` bytes; a trailing odd byte is
+         *     ignored. The range must lie inside the domain (400
+         *     `OUT_OF_RANGE`); there is no 64 KiB cap. The core reads the
+         *     emulator in batches of at most 1 MiB.
+         */
+        get: operations["readMemoryWords"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -1880,6 +1908,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    readMemoryWords: {
+        parameters: {
+            query: {
+                address?: number;
+                size: number;
+                stride?: number;
+            };
+            header?: never;
+            path: {
+                domain: components["parameters"]["DomainName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sampled words, little-endian, 2 bytes each. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
             };
             default: components["responses"]["Error"];
         };

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -165,6 +166,24 @@ func (a *api) ReadMemory(ctx context.Context, r gen.ReadMemoryRequestObject) (ge
 		return nil, err
 	}
 	return gen.ReadMemory200JSONResponse{Domain: r.Domain, Address: r.Params.Address, Data: hex.EncodeToString(b)}, nil
+}
+
+func (a *api) ReadMemoryWords(ctx context.Context, r gen.ReadMemoryWordsRequestObject) (gen.ReadMemoryWordsResponseObject, error) {
+	addr, stride := int64(0), int64(1)
+	if r.Params.Address != nil {
+		addr = *r.Params.Address
+	}
+	if r.Params.Stride != nil {
+		stride = *r.Params.Stride
+	}
+	if addr < 0 || r.Params.Size < 2 || r.Params.Size > math.MaxInt32 || stride < 1 || stride > 1<<16 {
+		return nil, newError(http.StatusBadRequest, CodeInvalidArgument, "address must be >= 0, size >= 2 and stride in 1..65536")
+	}
+	b, err := a.s.sess.ReadWords(ctx, r.Domain, uint64(addr), int(r.Params.Size), int(stride))
+	if err != nil {
+		return nil, err
+	}
+	return gen.ReadMemoryWords200ApplicationoctetStreamResponse{Body: bytes.NewReader(b), ContentLength: int64(len(b))}, nil
 }
 
 func (a *api) WriteMemory(ctx context.Context, r gen.WriteMemoryRequestObject) (gen.WriteMemoryResponseObject, error) {

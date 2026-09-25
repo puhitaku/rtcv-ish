@@ -94,8 +94,39 @@ Load/Save `.bl`. Layer size label.
 
 Domain select, address input, a hex view (16 bytes per row, 1/2/4-byte
 grouping), editing by typing, Freeze/Unfreeze (adds or removes an
-infinite value unit at the address), Refresh, follows the frame counter
-when "auto refresh" is on (1 Hz).
+infinite value unit at the address), Refresh, and a screenshot box.
+
+Below them, a Bitmaps box with one pane per memory domain (all domains,
+hidden ones included), stacked vertically at the full panel width. The
+pane header shows the name, size, "(hidden)", a stride selector and the
+native image size; clicking the name collapses or expands the pane
+(hidden domains start collapsed; the state and stride overrides persist
+in localStorage under `rtcvish.memoryBitmaps`). The pane draws the domain
+into a `<canvas>` at its native pixel size, scaled by CSS to the pane
+width (`image-rendering: pixelated`): each little-endian 16-bit word is
+one RGB565 pixel (bits 15..11 R, 10..5 G, 4..0 B, expanded to 8 bits).
+Data comes from `/api/memory/{domain}/words`.
+
+- Width: a power of two from the stride-1 pixel count `px = size/2`:
+  `2^floor((ceil(log2 px) + 2) / 2)`, capped at 4096, so the image is
+  landscape (4:1 or 2:1). The width is fixed per domain; the stride only
+  changes the height. E.g. 4 MiB → 2048×1024, 8 MiB → 4096×1024 (512
+  rows at stride 2), 16 MiB → 4096×2048 (512 at stride 4), 64 KiB →
+  256×128, 2 KiB → 64×16.
+- Stride: every stride-th word is fetched, so a pixel stands for
+  2·stride bytes. Auto is the smallest power of two that keeps one fetch
+  ≤ 4 MiB (4 MiB → 1, 8 MiB → 2, 16 MiB → 4); the selector offers
+  1/2/4/8/16 (and the auto value).
+- Hover shows a popup at the cursor with the domain-relative address
+  (hex, padded to the domain's width) and the 16-bit value from the last
+  fetch; it never fetches. Click jumps the hex view to that domain and
+  address (row-aligned, cursor on the byte), scrolls it into view and
+  flashes the pixel.
+
+Refresh and "auto (2 Hz)" drive the hex view and every expanded bitmap
+from one scheduler (500 ms). Collapsed panes do not fetch; a tick is
+skipped while the previous one is still running, while the page is
+hidden or no ROM is loaded, and the timer stops when the panel is left.
 
 ### Settings
 

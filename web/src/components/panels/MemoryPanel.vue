@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
+import MemoryBitmap from '@/components/memory/MemoryBitmap.vue'
 import { formatAddress, hex, hexRows, parseHex, wordToMemoryHex, type Group } from '@/lib/hex'
 import { useDomainsStore } from '@/stores/domains'
 import { act } from '@/stores/log'
-import { useMemoryStore } from '@/stores/memory'
+import { ROW, useMemoryStore } from '@/stores/memory'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
 
 const VIEW = 256
+const AUTO_MS = 500
 const mem = useMemoryStore()
 const domains = useDomainsStore()
 const st = useStatusStore()
@@ -45,51 +47,60 @@ function go() {
   const a = parseHex(addrText.value)
   if (a == null) return
   const max = Math.max(0, (domain.value?.size ?? 0) - 1)
-  mem.address = Math.min(a - (a % 16), max - (max % 16))
-  addrText.value = hex(mem.address)
+  const next = Math.min(a - (a % ROW), max - (max % ROW))
   cursor.value = null
-  void refresh()
+  addrText.value = hex(next)
+  if (next === mem.address) void refresh()
+  else mem.address = next
 }
 
 function page(dir: -1 | 1) {
   const next = mem.address + dir * VIEW
   if (next < 0 || next >= (domain.value?.size ?? 0)) return
-  mem.address = next
-  addrText.value = hex(next)
   cursor.value = null
-  void refresh()
+  mem.address = next
 }
 
-watch(
-  () => mem.domain,
-  () => {
-    mem.address = 0
-    addrText.value = '0'
-    mem.data = new Uint8Array()
-    cursor.value = null
-    void refresh()
-  },
-)
+function onDomain(e: Event) {
+  cursor.value = null
+  mem.setDomain((e.target as HTMLSelectElement).value)
+}
+
+// Domain and address changes (select, Go, paging, bitmap clicks) reload the view.
+watch([() => mem.domain, () => mem.address], ([d], [oldD]) => {
+  if (d !== oldD) cursor.value = null
+  addrText.value = hex(mem.address)
+  void refresh()
+})
 
 watch(
   () => domains.domains,
   (ds) => {
-    if (!ds.some((d) => d.name === mem.domain)) mem.domain = ds[0]?.name ?? ''
+    if (!ds.some((d) => d.name === mem.domain)) mem.setDomain(ds[0]?.name ?? '')
   },
   { immediate: true },
+)
+
+const memoryBox = ref<InstanceType<typeof BoxPanel> | null>(null)
+
+// A jump (bitmap click, Blast Editor) puts the cursor on the byte and shows the view.
+watch(
+  () => mem.focus?.seq,
+  () => {
+    const f = mem.focus
+    if (!f) return
+    cursor.value = f.address - mem.address
+    typed.value = ''
+    const el = memoryBox.value?.$el as HTMLElement | undefined
+    el?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  },
 )
 
 function consumeTarget() {
   const t = ui.memoryTarget
   if (!t) return
   ui.memoryTarget = null
-  mem.domain = t.domain
-  addrText.value = hex(t.address)
-  // Let the domain watcher reset first.
-  setTimeout(() => {
-    go()
-    cursor.value = t.address - mem.address
-  })
+  mem.jump(t.domain, t.address)
 }
 watch(() => ui.memoryTarget, consumeTarget)
 
@@ -142,10 +153,26 @@ function isFrozen(offset: number) {
   return !!mem.frozenAt(mem.domain, mem.address + offset)
 }
 
+const bitmaps = ref<InstanceType<typeof MemoryBitmap>[]>([])
+
+// One scheduler for the panel: the hex view and every expanded bitmap.
+// A tick is skipped while the previous refresh is still running, while the
+// page is hidden or without a ROM. The panel is unmounted when not shown.
+let busy = false
+async function refreshAll() {
+  if (busy || st.needRom || (typeof document !== 'undefined' && document.hidden)) return
+  busy = true
+  try {
+    await Promise.all([refresh(), ...bitmaps.value.map((b) => b.refresh())])
+  } finally {
+    busy = false
+  }
+}
+
 let timer: ReturnType<typeof setInterval> | undefined
 watch(auto, (on) => {
   clearInterval(timer)
-  if (on) timer = setInterval(() => void refresh(), 1000)
+  if (on) timer = setInterval(() => void refreshAll(), AUTO_MS)
 })
 onMounted(() => {
   consumeTarget()
@@ -162,9 +189,9 @@ function refreshShot() {
 
 <template>
   <div class="flex flex-wrap items-start gap-2" data-testid="memory-panel">
-    <BoxPanel title="Memory" class="min-w-[40rem] flex-1">
+    <BoxPanel ref="memoryBox" title="Memory" class="min-w-[40rem] flex-1">
       <div class="flex flex-wrap items-center gap-2">
-        <select v-model="mem.domain" class="input" data-testid="mem-domain">
+        <select :value="mem.domain" class="input" data-testid="mem-domain" @change="onDomain">
           <option v-if="!domains.domains.length" value="">(no domains)</option>
           <option v-for="d in domains.domains" :key="d.name" :value="d.name">{{ d.name }}</option>
         </select>
@@ -188,13 +215,13 @@ function refreshShot() {
           :disabled="!!st.needRom"
           :title="st.needRom"
           data-testid="mem-refresh"
-          @click="refresh"
+          @click="refreshAll"
         >
           Refresh
         </button>
         <label class="flex items-center gap-1">
           <input v-model="auto" type="checkbox" data-testid="mem-auto" />
-          auto (1 Hz)
+          auto (2 Hz)
         </label>
         <button
           class="btn"
@@ -268,6 +295,17 @@ function refreshShot() {
         @error="shotError = true"
       />
       <div v-else-if="shotError" class="text-err">screenshot unavailable</div>
+    </BoxPanel>
+
+    <BoxPanel title="Bitmaps" class="basis-full" data-testid="memory-bitmaps">
+      <div v-if="!domains.domains.length" class="text-dim">
+        {{ st.needRom || 'no domains' }}
+      </div>
+      <MemoryBitmap v-for="d in domains.domains" ref="bitmaps" :key="d.name" :domain="d" />
+      <div class="text-[11px] text-dim">
+        One pixel per little-endian 16-bit word as RGB565. Hover for the address, click to show it
+        in the hex view.
+      </div>
     </BoxPanel>
   </div>
 </template>

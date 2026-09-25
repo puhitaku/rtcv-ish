@@ -49,6 +49,7 @@ in the spec.
 | POST | `/api/domains/auto-select` | Select all non-hidden domains. |
 | GET | `/api/memory/{domain}?address=&size=` | Hex-encoded bytes (size ≤ 64 KiB). |
 | PUT | `/api/memory/{domain}` | `{address, data(hex)}` |
+| GET | `/api/memory/{domain}/words?address=&size=&stride=` | `application/octet-stream`: every `stride`-th little-endian 16-bit word of the range (word i = bytes at `address + 2·stride·i`), `2·ceil(floor(size/2)/stride)` bytes. `address` default 0, `stride` 1..65536 default 1. No 64 KiB cap: the range may be the whole domain (400 `OUT_OF_RANGE` past its end); the core reads the emulator in ≤ 1 MiB batches. Feeds the memory bitmaps. |
 
 ### Settings (engine config)
 
