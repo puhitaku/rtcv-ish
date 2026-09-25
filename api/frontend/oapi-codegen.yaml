@@ -1,0 +1,18 @@
+# oapi-codegen configuration for the core's Frontend API code.
+# Run scripts/gen.sh to regenerate internal/server/gen.
+package: gen
+output: internal/server/gen/api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+  embedded-spec: true
+  client: true
+compatibility:
+  always-prefix-enum-values: true
+output-options:
+  skip-prune: true
+  client-response-bytes-function: true
+  # /api/events is served by a hand-written SSE handler.
+  exclude-operation-ids:
+    - streamEvents

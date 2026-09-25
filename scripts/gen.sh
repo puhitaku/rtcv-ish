@@ -18,4 +18,10 @@ gen_emulator_go() {
 		api/emulator/v1/emulator.proto
 }
 
+gen_frontend_go() {
+	mkdir -p internal/server/gen
+	go tool oapi-codegen -config api/frontend/oapi-codegen.yaml api/frontend/openapi.yaml
+}
+
 gen_emulator_go
+gen_frontend_go

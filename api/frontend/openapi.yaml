@@ -1,0 +1,1616 @@
+openapi: 3.1.0
+info:
+  title: rtcv-ish Frontend API
+  version: 0.1.0
+  description: |
+    REST + JSON between the browser and the rtcv-ish core, plus one
+    Server-Sent Events stream (`GET /api/events`). See
+    `design/frontend-api.md` for the rules.
+
+    Errors are `Error` objects. `code` is one of:
+
+    | code | HTTP | meaning |
+    |---|---|---|
+    | `INVALID_ARGUMENT` | 400 | Bad request body, parameter or value (also emulator `INVALID_ARGUMENT`). |
+    | `OUT_OF_RANGE` | 400 | Address/size outside a domain (emulator `OUT_OF_RANGE`). |
+    | `NOT_FOUND` | 404 | Unknown domain, stash key, slot content, list, ROM path, bundled emulator. |
+    | `NO_ROM` | 409 | The emulator has no ROM loaded. |
+    | `BUSY` | 409 | The emulator is busy. |
+    | `UNSUPPORTED` | 409 | The emulator lacks the capability. |
+    | `ALREADY_CONNECTED` | 409 | Connect/launch while connected. |
+    | `NO_BACKUP` | 409 | Toggle or protection "back" with nothing to restore. |
+    | `CONNECT_FAILED` | 502 | Could not reach or handshake with the emulator. |
+    | `FAILED` | 502 | The emulator reported a failure. |
+    | `EMULATOR_DISCONNECTED` | 503 | The operation needs an emulator and none is connected. |
+    | `NOT_IMPLEMENTED` | 501 | Not implemented yet. |
+    | `INTERNAL` | 500 | Anything else. |
+
+    Numbers that are addresses or sizes are `int64`; JavaScript clients
+    see them as numbers (exact up to 2^53). Byte strings are lowercase hex
+    (input is case-insensitive). Values that can exceed 2^53 (engine
+    min/max, tilt) are decimal strings.
+servers:
+  - url: /api
+tags:
+  - name: status
+  - name: emulator
+  - name: memory
+  - name: settings
+  - name: blast
+  - name: savestates
+  - name: stash
+  - name: stockpile
+  - name: protection
+  - name: lists
+  - name: events
+
+paths:
+  /status:
+    get:
+      operationId: getStatus
+      tags: [status]
+      responses:
+        "200":
+          description: Core and emulator status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulators:
+    get:
+      operationId: listEmulators
+      tags: [emulator]
+      description: Bundled emulators the core can launch.
+      responses:
+        "200":
+          description: Bundled emulators.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BundledEmulator" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/connect:
+    post:
+      operationId: connectEmulator
+      tags: [emulator]
+      description: Connect to a running emulator. 409 `ALREADY_CONNECTED` when connected, 502 `CONNECT_FAILED` when unreachable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectRequest" }
+      responses:
+        "200":
+          description: Connected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/launch:
+    post:
+      operationId: launchEmulator
+      tags: [emulator]
+      description: |
+        Start a bundled emulator on a free port, connect to it and, when
+        `rom` is set, load the ROM. The emulator process is owned by the
+        core: it is quit when the core shuts down.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LaunchRequest" }
+      responses:
+        "200":
+          description: Launched and connected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/disconnect:
+    post:
+      operationId: disconnectEmulator
+      tags: [emulator]
+      description: Drop the connection; the emulator keeps running. Idempotent.
+      responses:
+        "200":
+          description: Disconnected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/rom:
+    post:
+      operationId: loadRom
+      tags: [emulator]
+      description: |
+        Load a ROM by path on the emulator host. Clears scheduled units,
+        refreshes the domain list and auto-selects the non-hidden domains.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PathRequest" }
+      responses:
+        "200":
+          description: ROM loaded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/close-rom:
+    post:
+      operationId: closeRom
+      tags: [emulator]
+      responses:
+        "200":
+          description: ROM closed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/pause:
+    post:
+      operationId: pauseEmulator
+      tags: [emulator]
+      responses:
+        "200":
+          description: Paused.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/resume:
+    post:
+      operationId: resumeEmulator
+      tags: [emulator]
+      responses:
+        "200":
+          description: Running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/reset:
+    post:
+      operationId: resetEmulator
+      tags: [emulator]
+      responses:
+        "200":
+          description: Reset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/step:
+    post:
+      operationId: stepEmulator
+      tags: [emulator]
+      description: Pause (if running) and emulate `frames` frames.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StepRequest" }
+      responses:
+        "200":
+          description: Stepped; the emulator is paused.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameStatus" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/quit:
+    post:
+      operationId: quitEmulator
+      tags: [emulator]
+      description: Ask the emulator to exit. The core is disconnected afterwards.
+      responses:
+        "204": { description: Quit sent. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /emulator/screenshot:
+    get:
+      operationId: getScreenshot
+      tags: [emulator]
+      responses:
+        "200":
+          description: PNG of all screens stacked vertically.
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+
+  /domains:
+    get:
+      operationId: listDomains
+      tags: [memory]
+      responses:
+        "200":
+          description: Memory domains of the loaded game (empty without a ROM).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Domain" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /domains/selected:
+    put:
+      operationId: setSelectedDomains
+      tags: [memory]
+      description: Replace the selection used by generation. Unknown names are 400 `INVALID_ARGUMENT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NamesRequest" }
+      responses:
+        "200":
+          description: Updated domain list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Domain" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /domains/auto-select:
+    post:
+      operationId: autoSelectDomains
+      tags: [memory]
+      description: Select all non-hidden domains.
+      responses:
+        "200":
+          description: Updated domain list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Domain" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /memory/{domain}:
+    parameters:
+      - { $ref: "#/components/parameters/DomainName" }
+    get:
+      operationId: readMemory
+      tags: [memory]
+      parameters:
+        - name: address
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: size
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1, maximum: 65536 }
+      responses:
+        "200":
+          description: Memory contents.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemoryChunk" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: writeMemory
+      tags: [memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemoryWrite" }
+      responses:
+        "204": { description: Written. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      responses:
+        "200":
+          description: The whole settings object.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: patchSettings
+      tags: [settings]
+      description: |
+        Deep merge: only the given fields change, nested objects are merged
+        field by field. The result is validated as a whole (400
+        `INVALID_ARGUMENT`, nothing changes) and persisted to
+        `settings.json`. `autoCorrupt` is not persisted; it is false at
+        start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsPatch" }
+      responses:
+        "200":
+          description: The whole settings object after the update.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast:
+    post:
+      operationId: manualBlast
+      tags: [blast]
+      description: Generate a layer with the current settings on the selected domains and apply it (no backup). 409 `NO_ROM` without a ROM, 400 `INVALID_ARGUMENT` when no domain is selected.
+      responses:
+        "200":
+          description: The generated layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast/apply:
+    post:
+      operationId: applyLayer
+      tags: [blast]
+      description: Apply a layer to the running game. With `backup`, the current bytes at every unit are stored for `/blast/toggle`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyRequest" }
+      responses:
+        "204": { description: Applied. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast/units:
+    get:
+      operationId: listUnits
+      tags: [blast]
+      responses:
+        "200":
+          description: Units currently scheduled in the emulator.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EmuUnit" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearUnits
+      tags: [blast]
+      responses:
+        "204": { description: Cleared. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast/toggle:
+    post:
+      operationId: toggleLayer
+      tags: [blast]
+      description: |
+        BlastLayer ON/OFF. `on:false` clears scheduled units and applies the
+        uncorrupt backup; `on:true` re-applies the last layer applied with
+        backup. 409 `NO_BACKUP` if no layer was applied with backup.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToggleRequest" }
+      responses:
+        "204": { description: Toggled. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast/reroll:
+    post:
+      operationId: rerollLayer
+      tags: [blast]
+      description: Return a rerolled copy of the layer following the `reroll` settings. Locked units are unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LayerRequest" }
+      responses:
+        "200":
+          description: The rerolled layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /savestates:
+    get:
+      operationId: listSavestates
+      tags: [savestates]
+      responses:
+        "200":
+          description: All savestate slots, numbered 1..50, in order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SavestateSlot" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /savestates/{slot}:
+    parameters:
+      - { $ref: "#/components/parameters/Slot" }
+    post:
+      operationId: saveSavestate
+      tags: [savestates]
+      description: Save the current state into the slot, replacing its content. Creates a stash key with `parentKey == key` (not added to the stash history). The label is kept.
+      responses:
+        "200":
+          description: The slot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavestateSlot" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: patchSavestate
+      tags: [savestates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LabelRequest" }
+      responses:
+        "200":
+          description: The slot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavestateSlot" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSavestate
+      tags: [savestates]
+      description: Empty the slot (key and label).
+      responses:
+        "204": { description: Deleted. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /savestates/{slot}/load:
+    parameters:
+      - { $ref: "#/components/parameters/Slot" }
+    post:
+      operationId: loadSavestate
+      tags: [savestates]
+      description: Clear scheduled units and load the slot's state. 404 `NOT_FOUND` for an empty slot.
+      responses:
+        "204": { description: Loaded. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash:
+    get:
+      operationId: listStash
+      tags: [stash]
+      responses:
+        "200":
+          description: Stash history, oldest first. `layer` is omitted.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearStash
+      tags: [stash]
+      responses:
+        "204": { description: Cleared. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/corrupt:
+    post:
+      operationId: corruptStash
+      tags: [stash]
+      description: |
+        Clear units, optionally load the slot's state, generate a layer with
+        the current settings, apply it with backup and add a new key
+        (`parentKey` = the slot's key) to the stash history.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CorruptRequest" }
+      responses:
+        "200":
+          description: The new key, with `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/inject:
+    post:
+      operationId: injectStash
+      tags: [stash]
+      description: Apply the layer of `key` (stash or stockpile) on the slot's state; adds a new stash key with the slot's `parentKey`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InjectRequest" }
+      responses:
+        "200":
+          description: The new key, with `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/merge:
+    post:
+      operationId: mergeStash
+      tags: [stash]
+      description: Concatenate the layers of 2+ keys (stash or stockpile; duplicates removed) on the first key's state, run it and add a new stash key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KeysRequest" }
+      responses:
+        "200":
+          description: The new key, with `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    patch:
+      operationId: patchStashKey
+      tags: [stash]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StashKeyPatch" }
+      responses:
+        "200":
+          description: The key without `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteStashKey
+      tags: [stash]
+      responses:
+        "204": { description: Removed. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}/run:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    post:
+      operationId: runStashKey
+      tags: [stash]
+      description: Clear units, load the key's state and apply its layer with backup.
+      responses:
+        "204": { description: Running. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}/original:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    post:
+      operationId: originalStashKey
+      tags: [stash]
+      description: Clear units and load the key's state without its layer.
+      responses:
+        "204": { description: Loaded. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}/reroll:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    post:
+      operationId: rerollStashKey
+      tags: [stash]
+      description: Add a new stash key with a rerolled copy of the layer (same `parentKey`) and run it.
+      responses:
+        "200":
+          description: The new key, with `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}/to-stockpile:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    post:
+      operationId: stashKeyToStockpile
+      tags: [stash]
+      description: Move the key from the stash history to the end of the stockpile.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToStockpileRequest" }
+      responses:
+        "200":
+          description: The key as stored in the stockpile, without `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stash/{key}/layer:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    get:
+      operationId: getStashLayer
+      tags: [stash]
+      responses:
+        "200":
+          description: The key's layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: putStashLayer
+      tags: [stash]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Layer" }
+      responses:
+        "200":
+          description: The stored layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile:
+    get:
+      operationId: listStockpile
+      tags: [stockpile]
+      responses:
+        "200":
+          description: Stockpile in order. `layer` is omitted.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearStockpile
+      tags: [stockpile]
+      responses:
+        "204": { description: Cleared. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/reorder:
+    post:
+      operationId: reorderStockpile
+      tags: [stockpile]
+      description: New order. `keys` must be a permutation of the stockpile's keys (400 otherwise).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KeysRequest" }
+      responses:
+        "200":
+          description: Stockpile in the new order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/export:
+    get:
+      operationId: exportStockpile
+      tags: [stockpile]
+      description: The stockpile as an `.sks` zip (`stockpile.json`, `states/<parentKey>.state`, `lists/<name>.txt` for lists referenced by units).
+      responses:
+        "200":
+          description: The `.sks` file.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/import:
+    post:
+      operationId: importStockpile
+      tags: [stockpile]
+      description: Upload an `.sks`. Replaces the stockpile unless `merge=true`, which appends.
+      parameters:
+        - name: merge
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/FileUpload" }
+      responses:
+        "200":
+          description: The stockpile after import.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/save:
+    post:
+      operationId: saveStockpile
+      tags: [stockpile]
+      description: Write the stockpile as `.sks` to a path on the core host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PathRequest" }
+      responses:
+        "204": { description: Saved. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/load:
+    post:
+      operationId: loadStockpile
+      tags: [stockpile]
+      description: Replace the stockpile with an `.sks` at a path on the core host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PathRequest" }
+      responses:
+        "200":
+          description: The loaded stockpile.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/{key}:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    patch:
+      operationId: patchStockpileKey
+      tags: [stockpile]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StashKeyPatch" }
+      responses:
+        "200":
+          description: The key without `layer`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StashKey" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteStockpileKey
+      tags: [stockpile]
+      responses:
+        "204": { description: Removed. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/{key}/run:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    post:
+      operationId: runStockpileKey
+      tags: [stockpile]
+      description: Clear units, load the key's state and apply its layer with backup.
+      responses:
+        "204": { description: Running. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /stockpile/{key}/layer:
+    parameters:
+      - { $ref: "#/components/parameters/Key" }
+    get:
+      operationId: getStockpileLayer
+      tags: [stockpile]
+      responses:
+        "200":
+          description: The key's layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: putStockpileLayer
+      tags: [stockpile]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Layer" }
+      responses:
+        "200":
+          description: The stored layer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layer" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /protection/backup:
+    post:
+      operationId: protectionBackup
+      tags: [protection]
+      description: Take a game protection backup now (savestate kept in memory, at most `gameProtection.keep`).
+      responses:
+        "204": { description: Backed up. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /protection/back:
+    post:
+      operationId: protectionBack
+      tags: [protection]
+      description: Load the most recent backup and drop it. 409 `NO_BACKUP` when there is none.
+      responses:
+        "204": { description: Loaded. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /lists:
+    get:
+      operationId: listLists
+      tags: [lists]
+      responses:
+        "200":
+          description: Lists in `data/lists/*.txt`, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ListInfo" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: uploadList
+      tags: [lists]
+      description: |
+        Upload a list file (one hex value per line). The list name is `name`
+        or the file name without `.txt`; an existing list is replaced.
+        400 for an empty or malformed list.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/ListUpload" }
+      responses:
+        "200":
+          description: The stored list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListInfo" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /lists/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteList
+      tags: [lists]
+      responses:
+        "204": { description: Deleted. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /events:
+    get:
+      operationId: streamEvents
+      tags: [events]
+      description: |
+        Server-Sent Events. Each event is `event: <type>` + `data: <json>`.
+        A `status` event is always sent first.
+
+        | type | data |
+        |---|---|
+        | `status` | `Status`, on connect and on every change |
+        | `frame` | `FrameEvent`, at most 10 per second |
+        | `blast` | `BlastEvent`, after every generated layer has been applied (manual, auto-corrupt, GH corrupt) |
+        | `stash`, `stockpile`, `savestates`, `settings`, `domains`, `lists` | `ChangedEvent` (`{}`): refetch |
+        | `log` | `LogEvent` |
+      responses:
+        "200":
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+
+components:
+  parameters:
+    DomainName:
+      name: domain
+      in: path
+      required: true
+      schema: { type: string }
+    Slot:
+      name: slot
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1, maximum: 50 }
+    Key:
+      name: key
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: Error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string, description: Human-readable message. }
+        code: { type: string, description: Machine-readable code (see the API description). }
+
+    Status:
+      type: object
+      required: [version, dataDir, connected, address, protectionBackups, blastLayer]
+      properties:
+        version: { type: string, description: Core version. }
+        dataDir: { type: string }
+        connected: { type: boolean }
+        address: { type: string, description: Emulator API address; empty when disconnected. }
+        emulator:
+          $ref: "#/components/schemas/EmulatorInfo"
+          description: Present while connected.
+        game:
+          $ref: "#/components/schemas/GameStatus"
+          description: Present while connected (state `noRom` without a ROM).
+        protectionBackups: { type: integer, description: Number of game protection backups held. }
+        blastLayer: { $ref: "#/components/schemas/BlastLayerState" }
+
+    BlastLayerState:
+      type: object
+      required: [available, on]
+      properties:
+        available: { type: boolean, description: "A layer was applied with backup, so it can be toggled." }
+        on: { type: boolean }
+
+    EmulatorInfo:
+      type: object
+      required: [name, version, system, protocolVersion, capabilities]
+      properties:
+        name: { type: string, examples: [melonDS] }
+        version: { type: string }
+        system: { type: string, examples: [nds] }
+        protocolVersion: { type: integer }
+        capabilities: { $ref: "#/components/schemas/Capabilities" }
+
+    Capabilities:
+      type: object
+      required: [savestates, screenshot, input, loadRom, reset, maxPayload]
+      properties:
+        savestates: { type: boolean }
+        screenshot: { type: boolean }
+        input: { type: boolean }
+        loadRom: { type: boolean }
+        reset: { type: boolean }
+        maxPayload: { type: integer, format: int64 }
+
+    GameState:
+      type: string
+      enum: [noRom, running, paused]
+
+    GameStatus:
+      type: object
+      required: [state, frame, romPath, title, code, console]
+      properties:
+        state: { $ref: "#/components/schemas/GameState" }
+        frame: { type: integer, format: int64 }
+        romPath: { type: string }
+        title: { type: string }
+        code: { type: string }
+        console: { type: string }
+
+    BundledEmulator:
+      type: object
+      required: [name, path, present]
+      properties:
+        name: { type: string }
+        path: { type: string }
+        present: { type: boolean, description: The executable exists. }
+
+    ConnectRequest:
+      type: object
+      required: [address]
+      properties:
+        address: { type: string, examples: ["127.0.0.1:42069"] }
+
+    LaunchRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        rom: { type: string, description: ROM path to load after connecting. }
+
+    PathRequest:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string, minLength: 1 }
+
+    StepRequest:
+      type: object
+      required: [frames]
+      properties:
+        frames: { type: integer, minimum: 1 }
+
+    Domain:
+      type: object
+      required: [name, size, wordSize, bigEndian, writable, hidden, selected]
+      properties:
+        name: { type: string }
+        size: { type: integer, format: int64 }
+        wordSize: { type: integer }
+        bigEndian: { type: boolean }
+        writable: { type: boolean }
+        hidden: { type: boolean }
+        selected: { type: boolean }
+
+    NamesRequest:
+      type: object
+      required: [names]
+      properties:
+        names:
+          type: array
+          items: { type: string }
+
+    Hex:
+      type: string
+      pattern: "^([0-9a-fA-F]{2})*$"
+      description: Bytes as hex, lowercase in responses.
+
+    Decimal:
+      type: string
+      pattern: "^-?[0-9]+$"
+      description: Integer as a decimal string (may exceed 2^53).
+
+    MemoryChunk:
+      type: object
+      required: [domain, address, data]
+      properties:
+        domain: { type: string }
+        address: { type: integer, format: int64 }
+        data: { $ref: "#/components/schemas/Hex" }
+
+    MemoryWrite:
+      type: object
+      required: [address, data]
+      properties:
+        address: { type: integer, format: int64, minimum: 0 }
+        data:
+          allOf: [{ $ref: "#/components/schemas/Hex" }]
+          minLength: 2
+          maxLength: 131072
+
+    # ---- Settings ----
+
+    Engine:
+      type: string
+      enum: [nightmare, hellgenie, distortion, freeze, pipe, vector, cluster, custom]
+
+    BlastRadius:
+      type: string
+      enum: [spread, chunk, burst, normalized, proportional, even]
+
+    Precision:
+      type: integer
+      enum: [1, 2, 4, 8]
+      description: Bytes per unit (8/16/32/64-bit).
+
+    NightmareAlgo:
+      type: string
+      enum: [random, randomTilt, tilt]
+
+    ClusterMethod:
+      type: string
+      enum: [random, reverse, rotateForwards, rotateBackwards, overwrite]
+
+    ClusterDirection:
+      type: string
+      enum: [forwards, backwards]
+
+    UnitSource:
+      type: string
+      enum: [value, store]
+
+    CustomValueSource:
+      type: string
+      enum: [random, valueList, range]
+
+    CustomStoreAddress:
+      type: string
+      enum: [same, random]
+
+    StoreTime:
+      type: string
+      enum: [immediate, preexecute]
+
+    StoreType:
+      type: string
+      enum: [once, continuous]
+
+    LimiterTime:
+      type: string
+      enum: [none, generate]
+      description: Only generation-time limiter checks are supported.
+
+    ValueRange:
+      type: object
+      required: [min, max]
+      properties:
+        min: { type: string, pattern: "^[0-9]+$", description: Unsigned decimal. }
+        max: { type: string, pattern: "^[0-9]+$", description: "Unsigned decimal; min <= max < 2^(8*precision)." }
+
+    PrecisionRanges:
+      type: object
+      description: |
+        Min/max per precision (bytes). Default full range, e.g.
+        `"1": {"min": "0", "max": "255"}`.
+      required: ["1", "2", "4", "8"]
+      properties:
+        "1": { $ref: "#/components/schemas/ValueRange", x-go-name: P1 }
+        "2": { $ref: "#/components/schemas/ValueRange", x-go-name: P2 }
+        "4": { $ref: "#/components/schemas/ValueRange", x-go-name: P4 }
+        "8": { $ref: "#/components/schemas/ValueRange", x-go-name: P8 }
+
+    NightmareSettings:
+      type: object
+      required: [algo, ranges]
+      properties:
+        algo: { $ref: "#/components/schemas/NightmareAlgo" }
+        ranges: { $ref: "#/components/schemas/PrecisionRanges" }
+
+    HellgenieSettings:
+      type: object
+      required: [ranges]
+      properties:
+        ranges: { $ref: "#/components/schemas/PrecisionRanges" }
+
+    DistortionSettings:
+      type: object
+      required: [delay]
+      properties:
+        delay: { type: integer, minimum: 1, description: "Frames. Default 50." }
+
+    VectorSettings:
+      type: object
+      required: [limiterList, valueList, unlockPrecision]
+      properties:
+        limiterList: { type: string, description: List name; empty = none. }
+        valueList: { type: string }
+        unlockPrecision: { type: boolean }
+
+    ClusterSettings:
+      type: object
+      required: [limiterList, chunkSize, method, modifier, direction, splitUnits, filterAll]
+      properties:
+        limiterList: { type: string }
+        chunkSize: { type: integer, minimum: 1, description: Default 3. }
+        method: { $ref: "#/components/schemas/ClusterMethod" }
+        modifier: { type: integer, minimum: 0, description: Rotation amount. Default 1. }
+        direction: { $ref: "#/components/schemas/ClusterDirection" }
+        splitUnits: { type: boolean, description: One unit per element (RTCV MULTIOUT). Default true. }
+        filterAll: { type: boolean }
+
+    CustomSettings:
+      type: object
+      required: [source, valueSource, ranges, valueList, storeAddress, storeTime, storeType, tilt, delay, lifetime, loop, limiterList, limiterTime, limiterInverted]
+      properties:
+        source: { $ref: "#/components/schemas/UnitSource" }
+        valueSource: { $ref: "#/components/schemas/CustomValueSource" }
+        ranges: { $ref: "#/components/schemas/PrecisionRanges" }
+        valueList: { type: string }
+        storeAddress: { $ref: "#/components/schemas/CustomStoreAddress" }
+        storeTime: { $ref: "#/components/schemas/StoreTime" }
+        storeType: { $ref: "#/components/schemas/StoreType" }
+        tilt: { $ref: "#/components/schemas/Decimal" }
+        delay: { type: integer, minimum: 0 }
+        lifetime: { type: integer, minimum: 0, description: 0 = infinite. }
+        loop: { type: boolean }
+        limiterList: { type: string }
+        limiterTime: { $ref: "#/components/schemas/LimiterTime" }
+        limiterInverted: { type: boolean }
+
+    RerollSettings:
+      type: object
+      required: [address, sourceAddress, domain, sourceDomain, followCustomEngine]
+      properties:
+        address: { type: boolean, description: Re-randomize the address. Default false. }
+        sourceAddress: { type: boolean, description: Re-randomize a store unit's source address. Default true. }
+        domain: { type: boolean, description: Re-randomize the domain. Default false. }
+        sourceDomain: { type: boolean, description: Re-randomize a store unit's source domain. Default true. }
+        followCustomEngine: { type: boolean, description: Values follow the custom engine range/list. Default false. }
+
+    GameProtectionSettings:
+      type: object
+      required: [enabled, intervalSeconds, keep]
+      properties:
+        enabled: { type: boolean }
+        intervalSeconds: { type: integer, minimum: 1, description: Default 5. }
+        keep: { type: integer, minimum: 1, description: Backups kept. Default 10. }
+
+    Settings:
+      type: object
+      description: |
+        Defaults: nightmare, intensity 1, errorDelay 1, spread, precision 1,
+        alignment 0, autoCorrupt false, maxInfiniteUnits 50, lockUnits
+        false; engine parameters as in RTCV (full min/max ranges).
+      required: [engine, intensity, errorDelay, radius, precision, alignment, autoCorrupt, maxInfiniteUnits, lockUnits, nightmare, hellgenie, distortion, vector, cluster, custom, reroll, gameProtection]
+      properties:
+        engine: { $ref: "#/components/schemas/Engine" }
+        intensity: { type: integer, format: int64, minimum: 1 }
+        errorDelay: { type: integer, format: int64, minimum: 1, description: Frames between auto-corrupt blasts. }
+        radius: { $ref: "#/components/schemas/BlastRadius" }
+        precision: { $ref: "#/components/schemas/Precision" }
+        alignment: { type: integer, minimum: 0, description: 0..precision-1. }
+        autoCorrupt: { type: boolean }
+        maxInfiniteUnits: { type: integer, minimum: 1 }
+        lockUnits: { type: boolean }
+        nightmare: { $ref: "#/components/schemas/NightmareSettings" }
+        hellgenie: { $ref: "#/components/schemas/HellgenieSettings" }
+        distortion: { $ref: "#/components/schemas/DistortionSettings" }
+        vector: { $ref: "#/components/schemas/VectorSettings" }
+        cluster: { $ref: "#/components/schemas/ClusterSettings" }
+        custom: { $ref: "#/components/schemas/CustomSettings" }
+        reroll: { $ref: "#/components/schemas/RerollSettings" }
+        gameProtection: { $ref: "#/components/schemas/GameProtectionSettings" }
+
+    PrecisionRangesPatch:
+      type: object
+      properties:
+        "1": { $ref: "#/components/schemas/ValueRange", x-go-name: P1 }
+        "2": { $ref: "#/components/schemas/ValueRange", x-go-name: P2 }
+        "4": { $ref: "#/components/schemas/ValueRange", x-go-name: P4 }
+        "8": { $ref: "#/components/schemas/ValueRange", x-go-name: P8 }
+
+    NightmareSettingsPatch:
+      type: object
+      properties:
+        algo: { $ref: "#/components/schemas/NightmareAlgo" }
+        ranges: { $ref: "#/components/schemas/PrecisionRangesPatch" }
+
+    HellgenieSettingsPatch:
+      type: object
+      properties:
+        ranges: { $ref: "#/components/schemas/PrecisionRangesPatch" }
+
+    DistortionSettingsPatch:
+      type: object
+      properties:
+        delay: { type: integer, minimum: 1 }
+
+    VectorSettingsPatch:
+      type: object
+      properties:
+        limiterList: { type: string }
+        valueList: { type: string }
+        unlockPrecision: { type: boolean }
+
+    ClusterSettingsPatch:
+      type: object
+      properties:
+        limiterList: { type: string }
+        chunkSize: { type: integer, minimum: 1 }
+        method: { $ref: "#/components/schemas/ClusterMethod" }
+        modifier: { type: integer, minimum: 0 }
+        direction: { $ref: "#/components/schemas/ClusterDirection" }
+        splitUnits: { type: boolean }
+        filterAll: { type: boolean }
+
+    CustomSettingsPatch:
+      type: object
+      properties:
+        source: { $ref: "#/components/schemas/UnitSource" }
+        valueSource: { $ref: "#/components/schemas/CustomValueSource" }
+        ranges: { $ref: "#/components/schemas/PrecisionRangesPatch" }
+        valueList: { type: string }
+        storeAddress: { $ref: "#/components/schemas/CustomStoreAddress" }
+        storeTime: { $ref: "#/components/schemas/StoreTime" }
+        storeType: { $ref: "#/components/schemas/StoreType" }
+        tilt: { $ref: "#/components/schemas/Decimal" }
+        delay: { type: integer, minimum: 0 }
+        lifetime: { type: integer, minimum: 0 }
+        loop: { type: boolean }
+        limiterList: { type: string }
+        limiterTime: { $ref: "#/components/schemas/LimiterTime" }
+        limiterInverted: { type: boolean }
+
+    RerollSettingsPatch:
+      type: object
+      properties:
+        address: { type: boolean }
+        sourceAddress: { type: boolean }
+        domain: { type: boolean }
+        sourceDomain: { type: boolean }
+        followCustomEngine: { type: boolean }
+
+    GameProtectionSettingsPatch:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        intervalSeconds: { type: integer, minimum: 1 }
+        keep: { type: integer, minimum: 1 }
+
+    SettingsPatch:
+      type: object
+      description: Any subset of `Settings`; nested objects are merged.
+      additionalProperties: false
+      properties:
+        engine: { $ref: "#/components/schemas/Engine" }
+        intensity: { type: integer, format: int64, minimum: 1 }
+        errorDelay: { type: integer, format: int64, minimum: 1 }
+        radius: { $ref: "#/components/schemas/BlastRadius" }
+        precision: { $ref: "#/components/schemas/Precision" }
+        alignment: { type: integer, minimum: 0 }
+        autoCorrupt: { type: boolean }
+        maxInfiniteUnits: { type: integer, minimum: 1 }
+        lockUnits: { type: boolean }
+        nightmare: { $ref: "#/components/schemas/NightmareSettingsPatch" }
+        hellgenie: { $ref: "#/components/schemas/HellgenieSettingsPatch" }
+        distortion: { $ref: "#/components/schemas/DistortionSettingsPatch" }
+        vector: { $ref: "#/components/schemas/VectorSettingsPatch" }
+        cluster: { $ref: "#/components/schemas/ClusterSettingsPatch" }
+        custom: { $ref: "#/components/schemas/CustomSettingsPatch" }
+        reroll: { $ref: "#/components/schemas/RerollSettingsPatch" }
+        gameProtection: { $ref: "#/components/schemas/GameProtectionSettingsPatch" }
+
+    # ---- Blast layers ----
+
+    Unit:
+      type: object
+      description: |
+        RTCV BlastUnit. `value` is `precision` bytes for `source: value`
+        (empty for store units). `tilt` is added to the value with
+        wrap-around arithmetic on `precision` bytes.
+      required: [enabled, locked, bigEndian, domain, address, precision, source, value, sourceDomain, sourceAddress, storeTime, storeType, tilt, executeFrame, lifetime, loop, limiterTime, limiterList, invertLimiter, generatedUsingValueList, note]
+      properties:
+        enabled: { type: boolean }
+        locked: { type: boolean }
+        bigEndian: { type: boolean }
+        domain: { type: string }
+        address: { type: integer, format: int64, minimum: 0 }
+        precision: { type: integer, minimum: 1, maximum: 16348 }
+        source: { $ref: "#/components/schemas/UnitSource" }
+        value: { $ref: "#/components/schemas/Hex" }
+        sourceDomain: { type: string }
+        sourceAddress: { type: integer, format: int64, minimum: 0 }
+        storeTime: { $ref: "#/components/schemas/StoreTime" }
+        storeType: { $ref: "#/components/schemas/StoreType" }
+        tilt: { $ref: "#/components/schemas/Decimal" }
+        executeFrame: { type: integer, minimum: 0 }
+        lifetime: { type: integer, minimum: 0, description: Frames; 0 = infinite. }
+        loop: { type: boolean }
+        loopTiming:
+          type: [integer, "null"]
+          minimum: 0
+          description: Delay for each loop re-apply; null uses executeFrame.
+        limiterTime: { $ref: "#/components/schemas/LimiterTime" }
+        limiterList: { type: string }
+        invertLimiter: { type: boolean }
+        generatedUsingValueList: { type: boolean }
+        note: { type: string }
+
+    Layer:
+      type: object
+      description: A blast layer. `.bl` files are this object.
+      required: [note, units]
+      properties:
+        note: { type: string }
+        units:
+          type: array
+          items: { $ref: "#/components/schemas/Unit" }
+
+    LayerRequest:
+      type: object
+      required: [layer]
+      properties:
+        layer: { $ref: "#/components/schemas/Layer" }
+
+    ApplyRequest:
+      type: object
+      required: [layer, backup]
+      properties:
+        layer: { $ref: "#/components/schemas/Layer" }
+        backup: { type: boolean }
+
+    ToggleRequest:
+      type: object
+      required: ["on"]
+      properties:
+        "on": { type: boolean }
+
+    EmuStoreSource:
+      type: object
+      required: [domain, address, continuous]
+      properties:
+        domain: { type: string }
+        address: { type: integer, format: int64 }
+        continuous: { type: boolean }
+
+    EmuUnit:
+      type: object
+      description: A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set.
+      required: [id, domain, address, size, tilt, delay, lifetime, loop, loopDelay]
+      properties:
+        id: { type: integer, format: int64 }
+        domain: { type: string }
+        address: { type: integer, format: int64 }
+        size: { type: integer, format: int64 }
+        value: { $ref: "#/components/schemas/Hex" }
+        store: { $ref: "#/components/schemas/EmuStoreSource" }
+        tilt: { type: integer, format: int64 }
+        delay: { type: integer, format: int64 }
+        lifetime: { type: integer, format: int64 }
+        loop: { type: boolean }
+        loopDelay: { type: integer, format: int64 }
+
+    # ---- Glitch Harvester ----
+
+    GameInfo:
+      type: object
+      required: [title, code, romPath, system]
+      properties:
+        title: { type: string }
+        code: { type: string }
+        romPath: { type: string }
+        system: { type: string }
+
+    StashKey:
+      type: object
+      required: [key, parentKey, alias, note, game, selectedDomains, unitCount, createdAt]
+      properties:
+        key: { type: string }
+        parentKey: { type: string, description: Key of the savestate this key is based on (`states/<parentKey>.state`). }
+        alias: { type: string, description: Display name; defaults to `key`. }
+        note: { type: string }
+        game: { $ref: "#/components/schemas/GameInfo" }
+        selectedDomains:
+          type: array
+          items: { type: string }
+        unitCount: { type: integer, description: Number of units in the layer. }
+        layer: { $ref: "#/components/schemas/Layer" }
+        createdAt: { type: string, format: date-time }
+
+    StashKeyPatch:
+      type: object
+      properties:
+        alias: { type: string }
+        note: { type: string }
+
+    SavestateSlot:
+      type: object
+      required: [slot, label]
+      properties:
+        slot: { type: integer, minimum: 1, maximum: 50 }
+        key: { type: string, description: Savestate key; absent for an empty slot. }
+        label: { type: string }
+        game: { $ref: "#/components/schemas/GameInfo" }
+
+    LabelRequest:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string }
+
+    CorruptRequest:
+      type: object
+      required: [slot, loadBefore]
+      properties:
+        slot: { type: integer, minimum: 1, maximum: 50 }
+        loadBefore: { type: boolean, description: Load the slot's state before generating (RTCV Auto-Load State). }
+
+    InjectRequest:
+      type: object
+      required: [key, slot]
+      properties:
+        key: { type: string }
+        slot: { type: integer, minimum: 1, maximum: 50 }
+
+    KeysRequest:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items: { type: string }
+
+    ToStockpileRequest:
+      type: object
+      properties:
+        alias: { type: string, description: New display name. }
+
+    FileUpload:
+      type: object
+      required: [file]
+      properties:
+        file: { type: string, format: binary }
+
+    # ---- Lists ----
+
+    ListInfo:
+      type: object
+      required: [name, precision, entries]
+      properties:
+        name: { type: string }
+        precision: { type: integer, description: Bytes per entry (length of the first entry). }
+        entries: { type: integer }
+
+    ListUpload:
+      type: object
+      required: [file]
+      properties:
+        file: { type: string, format: binary }
+        name: { type: string }
+
+    # ---- Events ----
+
+    EventType:
+      type: string
+      enum: [status, frame, blast, stash, stockpile, savestates, settings, domains, lists, log]
+
+    FrameEvent:
+      type: object
+      required: [frame]
+      properties:
+        frame: { type: integer, format: int64 }
+
+    BlastEvent:
+      type: object
+      required: [count, engine, elapsedMs]
+      properties:
+        count: { type: integer, description: Units in the generated layer. }
+        engine: { $ref: "#/components/schemas/Engine" }
+        elapsedMs: { type: number, format: double }
+
+    ChangedEvent:
+      type: object
+      description: "Empty object: refetch the resource named by the event type."
+
+    LogLevel:
+      type: string
+      enum: [debug, info, warn, error]
+
+    LogEvent:
+      type: object
+      required: [level, msg]
+      properties:
+        level: { $ref: "#/components/schemas/LogLevel" }
+        msg: { type: string }
