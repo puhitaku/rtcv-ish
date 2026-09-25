@@ -1,0 +1,9 @@
+[submodule "references/rtcv"]
+	path = references/rtcv
+	url = https://github.com/redscientistlabs/RTCV.git
+[submodule "references/melonds50x-vanguard"]
+	path = references/melonds50x-vanguard
+	url = https://github.com/redscientistlabs/melonDS50X-Vanguard.git
+[submodule "references/melonds"]
+	path = emulators/melonds
+	url = git@github.com:puhitaku/melonDS.git
