@@ -71,6 +71,50 @@ func (l *Layer) Validate() error {
 	return errors.Join(errs...)
 }
 
+// RangeError is a unit whose target or store source range does not fit in
+// its domain.
+type RangeError struct {
+	Unit       int
+	Domain     string
+	Address    uint64
+	Size       int
+	DomainSize uint64
+}
+
+func (e *RangeError) Error() string {
+	return fmt.Sprintf("unit %d: %s 0x%x+0x%x exceeds size 0x%x", e.Unit, e.Domain, e.Address, e.Size, e.DomainSize)
+}
+
+func (e *RangeError) Unwrap() error { return ErrOutOfRange }
+
+// CheckRanges reports the first unit whose address+precision, or store
+// source address+precision, exceeds the size of its domain. Units on
+// domains missing from domains are not checked.
+func (l *Layer) CheckRanges(domains []Domain) error {
+	byName := make(map[string]Domain, len(domains))
+	for _, d := range domains {
+		byName[d.Name] = d
+	}
+	check := func(i int, name string, addr uint64, size int) error {
+		d, ok := byName[name]
+		if !ok || d.contains(addr, size) {
+			return nil
+		}
+		return &RangeError{Unit: i, Domain: name, Address: addr, Size: size, DomainSize: d.Size}
+	}
+	for i, u := range l.Units {
+		if err := check(i, u.Domain, u.Address, u.Precision); err != nil {
+			return err
+		}
+		if u.Source == SourceStore {
+			if err := check(i, u.SourceDomain, u.SourceAddress, u.Precision); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Merge concatenates copies of the units of all layers.
 func Merge(layers ...*Layer) *Layer {
 	out := &Layer{}

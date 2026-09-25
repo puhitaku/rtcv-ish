@@ -1,6 +1,7 @@
 package corrupt
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/big"
 	"path/filepath"
@@ -97,6 +98,9 @@ func TestUnitValidate(t *testing.T) {
 		{"no domain", func(u *Unit) { u.Domain = "" }, false},
 		{"zero precision", func(u *Unit) { u.Precision = 0 }, false},
 		{"huge precision", func(u *Unit) { u.Precision = MaxPrecision + 1 }, false},
+		{"16 MiB store", func(u *Unit) { u.Precision = 16 << 20 }, true},
+		{"16 MiB value", func(u *Unit) { u.Source = SourceValue; u.Precision = 16 << 20; u.Value = make(Hex, 16<<20) }, true},
+		{"16 MiB + 1 value", func(u *Unit) { u.Source = SourceValue; u.Precision = 16<<20 + 1; u.Value = make(Hex, 16<<20+1) }, false},
 		{"value length", func(u *Unit) { u.Source = SourceValue; u.Value = Hex{1} }, false},
 		{"value ok", func(u *Unit) { u.Source = SourceValue }, true},
 		{"no source domain", func(u *Unit) { u.SourceDomain = "" }, false},
@@ -117,6 +121,42 @@ func TestUnitValidate(t *testing.T) {
 	}
 }
 
+func TestUnitJSONLargeValue(t *testing.T) {
+	v := make([]byte, MaxPrecision)
+	for i := range v {
+		v[i] = byte(i)
+	}
+	u := NewUnit()
+	u.Domain, u.Precision, u.Value = "A", len(v), v
+	data, err := json.Marshal(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Unit
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Value, v) || got.Precision != MaxPrecision {
+		t.Fatalf("round trip: precision %d, %d bytes", got.Precision, len(got.Value))
+	}
+	if err := got.Validate(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestHexOddLength(t *testing.T) {
+	var h Hex
+	if err := h.UnmarshalText([]byte(" ABc ")); err != nil || !bytes.Equal(h, []byte{0x0a, 0xbc}) {
+		t.Errorf("got %X, %v", h, err)
+	}
+	if err := h.UnmarshalText([]byte("g12")); err == nil {
+		t.Error("bad leading digit accepted")
+	}
+	if err := h.UnmarshalText(nil); err != nil || len(h) != 0 {
+		t.Errorf("empty: %X, %v", h, err)
+	}
+}
+
 func TestSetPrecision(t *testing.T) {
 	u := NewUnit()
 	u.Value, u.Precision = Hex{0x11, 0x22}, 2
@@ -127,6 +167,10 @@ func TestSetPrecision(t *testing.T) {
 	u.SetPrecision(1)
 	if !reflect.DeepEqual(u.Value, Hex{0x22}) || u.Precision != 1 {
 		t.Errorf("shrink: %X", u.Value)
+	}
+	u.SetPrecision(MaxPrecision + 1)
+	if u.Precision != MaxPrecision || len(u.Value) != MaxPrecision || u.Value[MaxPrecision-1] != 0x22 || u.Value[0] != 0 {
+		t.Errorf("grow to max: precision %d, %d bytes", u.Precision, len(u.Value))
 	}
 }
 

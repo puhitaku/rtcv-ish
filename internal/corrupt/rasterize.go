@@ -21,13 +21,16 @@ import (
 // ExecuteFrame, Lifetime and Loop map to delay, lifetime and loop.
 // loop_delay is LoopTiming when set, else ExecuteFrame, like RTCV's
 // re-apply. Tilt on sizes other than 1, 2, 4 and 8 bytes is dropped.
-// Units whose domain is unknown or whose range leaves the domain are
-// skipped, like RTCV ignores out-of-range pokes. Invalid units are an
-// error.
+// Units whose domain is unknown are skipped. A unit, enabled or not,
+// whose target or store source range leaves its domain is a *RangeError;
+// other invalid enabled units are an error too.
 //
 // Units with lifetime 0 get mode infinite, store units at most SCANLINE
 // (HARD is value-only); every other unit is FRAME.
 func Rasterize(ctx context.Context, layer *Layer, mem Memory, infinite emulatorv1.Mode, nextID func() uint64) ([]*emulatorv1.Unit, error) {
+	if err := layer.CheckRanges(mem.Domains()); err != nil {
+		return nil, err
+	}
 	domains := make(map[string]Domain)
 	for _, d := range mem.Domains() {
 		domains[d.Name] = d

@@ -131,6 +131,9 @@ func (s *Session) apply(ctx context.Context, cn *conn, l *corrupt.Layer, backup,
 			"freezeMode", want, "using", corrupt.ModeName(mode), "emulator", cn.info.Name)
 	}
 	mem := corrupt.EmuMemory(cn.client, pd)
+	if err := l.CheckRanges(mem.Domains()); err != nil {
+		return classify(err)
+	}
 	var bk *corrupt.Layer
 	var err error
 	if backup {
@@ -230,31 +233,24 @@ func (s *Session) ApplyLayer(ctx context.Context, l *corrupt.Layer, backup bool)
 	})
 }
 
+// checkTargetsLocked reports enabled units on unknown domains and units
+// that do not fit in their domain.
 func (s *Session) checkTargetsLocked(l *corrupt.Layer) error {
-	check := func(i int, name string, addr uint64, size int) error {
-		j := slices.IndexFunc(s.domains, func(d corrupt.Domain) bool { return d.Name == name })
-		if j < 0 {
-			return errorf(KindNotFound, "unit %d: unknown domain %q", i, name)
-		}
-		if d := s.domains[j]; addr > d.Size || uint64(size) > d.Size-addr {
-			return errorf(KindOutOfRange, "unit %d: %s 0x%x+%d exceeds size 0x%x", i, name, addr, size, d.Size)
-		}
-		return nil
+	known := func(name string) bool {
+		return slices.ContainsFunc(s.domains, func(d corrupt.Domain) bool { return d.Name == name })
 	}
 	for i, u := range l.Units {
 		if !u.Enabled {
 			continue
 		}
-		if err := check(i, u.Domain, u.Address, u.Precision); err != nil {
-			return err
+		if !known(u.Domain) {
+			return errorf(KindNotFound, "unit %d: unknown domain %q", i, u.Domain)
 		}
-		if u.Source == corrupt.SourceStore {
-			if err := check(i, u.SourceDomain, u.SourceAddress, u.Precision); err != nil {
-				return err
-			}
+		if u.Source == corrupt.SourceStore && !known(u.SourceDomain) {
+			return errorf(KindNotFound, "unit %d: unknown domain %q", i, u.SourceDomain)
 		}
 	}
-	return nil
+	return classify(l.CheckRanges(s.domains))
 }
 
 // EmuUnit is a unit scheduled in the emulator.

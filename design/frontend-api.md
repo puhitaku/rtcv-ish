@@ -107,6 +107,16 @@ storeType (once|continuous), tilt (string decimal, may exceed int64), executeFra
 limiterTime, limiterList, invertLimiter, generatedUsingValueList, note`.
 `.bl` files are this object.
 
+`precision` is 1..16 MiB (16777216; RTCV caps it at 16348). Every unit,
+enabled or not, must fit in its domain: `address + precision <= size`, and
+`sourceAddress + precision <= size` of the source domain for store units.
+Applying (`/blast/apply`, toggle, run, inject, corrupt) or storing
+(`PUT .../layer`) a layer that breaks this is 400 `OUT_OF_RANGE` with a
+message naming the unit, e.g. `unit 3: MainRAM 0x3fff0+0x20 exceeds size
+0x40000`. Units on domains the emulator does not list are only checked
+by `/blast/apply` (404 `NOT_FOUND`); elsewhere they are skipped.
+Generation never produces units that do not fit.
+
 ### Glitch Harvester
 
 | Method | Path | Purpose |

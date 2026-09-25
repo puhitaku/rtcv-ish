@@ -514,6 +514,9 @@ func (s *Session) SetKeyLayer(inStockpile bool, key string, l *corrupt.Layer) (*
 	if err != nil {
 		return nil, classify(err)
 	}
+	if err := l.CheckRanges(s.domains); err != nil {
+		return nil, classify(err)
+	}
 	k.SetLayer(l.Clone())
 	s.changed(listEvent(inStockpile))
 	return layerOf(k), nil

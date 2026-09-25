@@ -1413,6 +1413,12 @@ export interface components {
             domain: string;
             /** Format: int64 */
             address: number;
+            /**
+             * @description Bytes, up to 16 MiB. `address + precision` (and
+             *     `sourceAddress + precision` for store units) must fit in the
+             *     domain; applying, running or storing a layer that does not is
+             *     400 `OUT_OF_RANGE` naming the unit.
+             */
             precision: number;
             source: components["schemas"]["UnitSource"];
             value: components["schemas"]["Hex"];

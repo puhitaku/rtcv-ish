@@ -14,8 +14,8 @@ import (
 	"strings"
 )
 
-// MaxPrecision is RTCV's cap on BlastUnit.Precision.
-const MaxPrecision = 16348
+// MaxPrecision caps Unit.Precision at 16 MiB. RTCV caps it at 16348.
+const MaxPrecision = 16 << 20
 
 type Source string
 
@@ -52,16 +52,20 @@ const (
 type Hex []byte
 
 func (h Hex) MarshalText() ([]byte, error) {
-	return []byte(hex.EncodeToString(h)), nil
+	return hex.AppendEncode(nil, h), nil
 }
 
 func (h *Hex) UnmarshalText(text []byte) error {
-	s := strings.TrimSpace(string(text))
-	if len(s)%2 == 1 {
-		s = "0" + s
+	text = bytes.TrimSpace(text)
+	b := make([]byte, (len(text)+1)/2)
+	dst, src := b, text
+	if len(text)%2 == 1 {
+		if _, err := hex.Decode(b[:1], []byte{'0', text[0]}); err != nil {
+			return fmt.Errorf("invalid hex value: %w", err)
+		}
+		dst, src = b[1:], text[1:]
 	}
-	b, err := hex.DecodeString(s)
-	if err != nil {
+	if _, err := hex.Decode(dst, src); err != nil {
 		return fmt.Errorf("invalid hex value: %w", err)
 	}
 	*h = b
@@ -166,7 +170,9 @@ func (u *Unit) SetPrecision(p int) {
 func resize(b []byte, n int) []byte {
 	switch {
 	case len(b) < n:
-		return append(make([]byte, n-len(b)), b...)
+		out := make([]byte, n)
+		copy(out[n-len(b):], b)
+		return out
 	case len(b) > n:
 		return bytes.Clone(b[len(b)-n:])
 	}

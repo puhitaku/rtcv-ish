@@ -254,6 +254,8 @@ func classify(err error) error {
 	switch {
 	case err == nil || passthrough(err):
 		return err
+	case errors.As(err, new(*corrupt.RangeError)):
+		return &Error{Kind: KindOutOfRange, Msg: err.Error(), Err: err}
 	case errors.Is(err, stockpile.ErrNotFound), errors.Is(err, os.ErrNotExist):
 		return &Error{Kind: KindNotFound, Msg: err.Error(), Err: err}
 	case errors.Is(err, stockpile.ErrInvalid), errors.Is(err, corrupt.ErrNoDomains),

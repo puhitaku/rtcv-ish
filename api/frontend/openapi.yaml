@@ -1578,7 +1578,15 @@ components:
         bigEndian: { type: boolean }
         domain: { type: string }
         address: { type: integer, format: int64, minimum: 0 }
-        precision: { type: integer, minimum: 1, maximum: 16348 }
+        precision:
+          type: integer
+          minimum: 1
+          maximum: 16777216
+          description: |
+            Bytes, up to 16 MiB. `address + precision` (and
+            `sourceAddress + precision` for store units) must fit in the
+            domain; applying, running or storing a layer that does not is
+            400 `OUT_OF_RANGE` naming the unit.
         source: { $ref: "#/components/schemas/UnitSource" }
         value: { $ref: "#/components/schemas/Hex" }
         sourceDomain: { type: string }
@@ -1644,7 +1652,7 @@ components:
         id: { type: integer, format: int64 }
         domain: { type: string }
         address: { type: integer, format: int64 }
-        size: { type: integer, format: int64 }
+        size: { type: integer, format: int64, minimum: 1, maximum: 16777216 }
         value: { $ref: "#/components/schemas/Hex" }
         store: { $ref: "#/components/schemas/EmuStoreSource" }
         tilt: { type: integer, format: int64 }

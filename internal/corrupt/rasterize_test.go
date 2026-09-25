@@ -1,6 +1,7 @@
 package corrupt
 
 import (
+	"errors"
 	"math/big"
 	"slices"
 	"testing"
@@ -95,8 +96,6 @@ func TestRasterizeSkipsAndIDs(t *testing.T) {
 		newValueUnit("A", 0, []byte{1}, false, 1),
 		disabled,
 		newValueUnit("X", 0, []byte{1}, false, 1),
-		newValueUnit("A", 15, []byte{1, 2}, false, 1),
-		newStoreUnit(StoreOnce, StoreImmediate, "A", 0, "A", 15, 2, false, 0, 1),
 		newStoreUnit(StoreOnce, StoreImmediate, "A", 2, "A", 4, 2, false, 0, 1),
 		newStoreUnit(StoreContinuous, StorePreExecute, "A", 4, "X", 4, 2, false, 0, 1),
 		newValueUnit("A", 1, []byte{2}, false, 1),
@@ -120,6 +119,30 @@ func TestRasterizeSkipsAndIDs(t *testing.T) {
 	bad := &Layer{Units: []*Unit{{Enabled: true, Domain: "A", Precision: 2, Source: SourceValue, Value: Hex{1}}}}
 	if _, err := Rasterize(t.Context(), bad, mem, emulatorv1.Mode_FRAME, func() uint64 { return 1 }); err == nil {
 		t.Error("invalid unit accepted")
+	}
+}
+
+func TestRasterizeOutOfRange(t *testing.T) {
+	mem := newFakeMem(dom("A", 16))
+	ok := newValueUnit("A", 0, []byte{1}, false, 1)
+	disabled := newValueUnit("A", 16, []byte{1}, false, 1)
+	disabled.Enabled = false
+	for _, tt := range []struct {
+		name string
+		u    *Unit
+		want string
+	}{
+		{"target", newValueUnit("A", 15, []byte{1, 2}, false, 1), "unit 1: A 0xf+0x2 exceeds size 0x10"},
+		{"store source", newStoreUnit(StoreOnce, StoreImmediate, "A", 0, "A", 15, 2, false, 0, 1), "unit 1: A 0xf+0x2 exceeds size 0x10"},
+		{"address past end", newValueUnit("A", 1<<40, []byte{1}, false, 1), "unit 1: A 0x10000000000+0x1 exceeds size 0x10"},
+		{"disabled", disabled, "unit 1: A 0x10+0x1 exceeds size 0x10"},
+	} {
+		l := &Layer{Units: []*Unit{ok, tt.u}}
+		_, err := Rasterize(t.Context(), l, mem, emulatorv1.Mode_FRAME, func() uint64 { return 1 })
+		var re *RangeError
+		if !errors.As(err, &re) || !errors.Is(err, ErrOutOfRange) || err.Error() != tt.want {
+			t.Errorf("%s: err = %v, want %q", tt.name, err, tt.want)
+		}
 	}
 }
 
