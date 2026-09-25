@@ -23,7 +23,45 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+rtcv-ish is a reimplementation of RTCV (Real-Time Corruptor Vanguard) and
+builds on the third-party projects listed below. Thanks to their authors.
+
+
+** RTCV (Real-Time Corruptor Vanguard) **
+
+URL: https://github.com/redscientistlabs/RTCV
+Copyright (c) 2018-2020 Phil Girard & Daniel Barreiro
+SPDX: MIT
+License: /references/rtcv/LICENSE
+
+
+** melonDS **
+
+URL: https://github.com/melonDS-emu/melonDS
+Copyright 2016-2026 melonDS team (from source headers; the LICENSE file has no project copyright line)
+SPDX: GPL-3.0-or-later
+License: /emulators/melonds/LICENSE
+
+
 ** melonDS50X-Vanguard **
 
+URL: https://github.com/redscientistlabs/melonDS50X-Vanguard
+Copyright 2016-2019 Arisotura (from source headers; the LICENSE file has no project copyright line)
 SPDX: GPL-3.0-or-later
 License: /references/melonds50x-vanguard/LICENSE
+
+
+** nds-examples (devkitPro) **
+
+URL: https://github.com/devkitPro/nds-examples
+Copyright: none stated
+SPDX: NONE
+License: none. The repository has no LICENSE file; only individual files carry notices (e.g. Graphics/3D/Picking/source/main.cpp is public domain).
+
+
+** nanopb **
+
+URL: https://github.com/nanopb/nanopb
+Copyright (c) 2011 Petteri Aimonen <jpa at nanopb.mail.kapsi.fi>
+SPDX: Zlib
+License: /sdk/cpp/rtcvish/nanopb/LICENSE.txt (also /emulators/melonds/src/frontend/qt_sdl/rtcvish/nanopb/LICENSE.txt)
