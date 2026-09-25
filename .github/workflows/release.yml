@@ -323,9 +323,9 @@ jobs:
           path: ${{ env.NAME }}.zip
           archive: false
 
+  # On branches this is a dry run against the Unreleased section.
   release:
     name: Release
-    if: github.ref_type == 'tag'
     needs: [package-linux, package-macos, package-windows]
     runs-on: ubuntu-latest
     permissions:
@@ -343,9 +343,23 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           ls -l dist
-          ./scripts/changelog-section.sh "$TAG" > notes.md
+          if [[ $(find dist -type f | wc -l) -ne 3 ]]; then
+            echo "::error::expected 3 archives in dist"
+            exit 1
+          fi
+          section=$TAG
+          if [[ $GITHUB_REF_TYPE != tag ]]; then
+            section=Unreleased
+          fi
+          ./scripts/changelog-section.sh "$section" > notes.md
           flags=()
           if [[ $TAG == *-* ]]; then
             flags+=(--prerelease)
           fi
-          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}" dist/*
+          cmd=(gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}" dist/*)
+          if [[ $GITHUB_REF_TYPE != tag ]]; then
+            echo "Dry run: ${cmd[*]}"
+            cat notes.md
+            exit 0
+          fi
+          "${cmd[@]}"
