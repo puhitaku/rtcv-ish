@@ -3,7 +3,9 @@
 // Set RTCVISH_MELONDS to the melonDS executable (or its .app bundle on
 // macOS). RTCVISH_ROM_DIR overrides the test ROM directory, which defaults
 // to test/roms. Missing default ROMs are built once with
-// scripts/build-nds-examples.sh.
+// scripts/build-nds-examples.sh. RTCVISH_MELONDS_JIT=1 runs melonDS with
+// the JIT and fast memory enabled, RTCVISH_MELONDS_JIT=nofastmem with the
+// JIT only.
 package e2e
 
 import (
@@ -44,6 +46,20 @@ UseGL = false
 [Instance0.Audio]
 Volume = 0
 `
+
+const melonDSJITConfig = `
+[JIT]
+Enable = true
+FastMemory = %v
+`
+
+// JIT reports whether RTCVISH_MELONDS_JIT asks for the JIT.
+func JIT() bool {
+	v := os.Getenv("RTCVISH_MELONDS_JIT")
+	return v != "" && v != "0"
+}
+
+func jitFastMemory() bool { return os.Getenv("RTCVISH_MELONDS_JIT") != "nofastmem" }
 
 // Emulator is a melonDS process with a connected client.
 type Emulator struct {
@@ -154,7 +170,11 @@ func StartMelonDS(t testing.TB, rom string) *Emulator {
 	exe := MelonDSPath(t)
 
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "melonDS.toml"), []byte(melonDSConfig), 0o644); err != nil {
+	config := melonDSConfig
+	if JIT() {
+		config += fmt.Sprintf(melonDSJITConfig, jitFastMemory())
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "melonDS.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))

@@ -10,6 +10,19 @@
 #endif
 
 /* Enum definitions */
+/* FRAME writes once per frame before emulation (RTCV's behaviour).
+ SCANLINE also rewrites at every scanline, so a value the game
+ overwrites is restored within a fraction of a frame. HARD, for value
+ units only, additionally intercepts CPU and DMA writes to the unit's
+ bytes so the game never observes another value. Emulators that cannot
+ implement a mode fall back to the previous one and say so in
+ Capabilities. */
+typedef enum _rtcvish_emulator_v1_Mode {
+    rtcvish_emulator_v1_Mode_FRAME = 0,
+    rtcvish_emulator_v1_Mode_SCANLINE = 1,
+    rtcvish_emulator_v1_Mode_HARD = 2
+} rtcvish_emulator_v1_Mode;
+
 typedef enum _rtcvish_emulator_v1_Error_Code {
     rtcvish_emulator_v1_Error_Code_UNKNOWN = 0,
     rtcvish_emulator_v1_Error_Code_INVALID_ARGUMENT = 1,
@@ -47,6 +60,9 @@ typedef struct _rtcvish_emulator_v1_Capabilities {
     bool reset;
     /* Largest read/write/savestate payload the emulator accepts in one message. */
     uint32_t max_payload;
+    /* Unit modes beyond FRAME the emulator implements. */
+    bool scanline_units;
+    bool hard_units;
 } rtcvish_emulator_v1_Capabilities;
 
 typedef struct _rtcvish_emulator_v1_HelloResponse {
@@ -237,6 +253,8 @@ typedef struct _rtcvish_emulator_v1_Unit {
  0 executes again on the very next frame. delay applies only to the
  first execution. */
     uint32_t loop_delay;
+    /* How the write is enforced while the unit executes (see Mode). */
+    rtcvish_emulator_v1_Mode mode;
 } rtcvish_emulator_v1_Unit;
 
 typedef struct _rtcvish_emulator_v1_ApplyUnitsRequest {
@@ -422,6 +440,10 @@ extern "C" {
 #endif
 
 /* Helper constants for enums */
+#define _rtcvish_emulator_v1_Mode_MIN rtcvish_emulator_v1_Mode_FRAME
+#define _rtcvish_emulator_v1_Mode_MAX rtcvish_emulator_v1_Mode_HARD
+#define _rtcvish_emulator_v1_Mode_ARRAYSIZE ((rtcvish_emulator_v1_Mode)(rtcvish_emulator_v1_Mode_HARD+1))
+
 #define _rtcvish_emulator_v1_Error_Code_MIN rtcvish_emulator_v1_Error_Code_UNKNOWN
 #define _rtcvish_emulator_v1_Error_Code_MAX rtcvish_emulator_v1_Error_Code_BUSY
 #define _rtcvish_emulator_v1_Error_Code_ARRAYSIZE ((rtcvish_emulator_v1_Error_Code)(rtcvish_emulator_v1_Error_Code_BUSY+1))
@@ -468,6 +490,7 @@ extern "C" {
 
 
 
+#define rtcvish_emulator_v1_Unit_mode_ENUMTYPE rtcvish_emulator_v1_Mode
 
 
 
@@ -500,7 +523,7 @@ extern "C" {
 #define rtcvish_emulator_v1_Error_init_default   {_rtcvish_emulator_v1_Error_Code_MIN, NULL}
 #define rtcvish_emulator_v1_HelloRequest_init_default {0, NULL}
 #define rtcvish_emulator_v1_HelloResponse_init_default {0, NULL, NULL, NULL, false, rtcvish_emulator_v1_Capabilities_init_default}
-#define rtcvish_emulator_v1_Capabilities_init_default {0, 0, 0, 0, 0, 0}
+#define rtcvish_emulator_v1_Capabilities_init_default {0, 0, 0, 0, 0, 0, 0, 0}
 #define rtcvish_emulator_v1_Status_init_default  {_rtcvish_emulator_v1_Status_State_MIN, 0, NULL, NULL, NULL, NULL}
 #define rtcvish_emulator_v1_GetStatusRequest_init_default {0}
 #define rtcvish_emulator_v1_GetStatusResponse_init_default {false, rtcvish_emulator_v1_Status_init_default}
@@ -529,7 +552,7 @@ extern "C" {
 #define rtcvish_emulator_v1_ResumeResponse_init_default {0}
 #define rtcvish_emulator_v1_StepRequest_init_default {0}
 #define rtcvish_emulator_v1_StepResponse_init_default {0}
-#define rtcvish_emulator_v1_Unit_init_default    {0, NULL, 0, 0, 0, {NULL}, 0, 0, 0, 0, 0}
+#define rtcvish_emulator_v1_Unit_init_default    {0, NULL, 0, 0, 0, {NULL}, 0, 0, 0, 0, 0, _rtcvish_emulator_v1_Mode_MIN}
 #define rtcvish_emulator_v1_StoreSource_init_default {NULL, 0, 0}
 #define rtcvish_emulator_v1_ApplyUnitsRequest_init_default {0, NULL}
 #define rtcvish_emulator_v1_ApplyUnitsResponse_init_default {0}
@@ -559,7 +582,7 @@ extern "C" {
 #define rtcvish_emulator_v1_Error_init_zero      {_rtcvish_emulator_v1_Error_Code_MIN, NULL}
 #define rtcvish_emulator_v1_HelloRequest_init_zero {0, NULL}
 #define rtcvish_emulator_v1_HelloResponse_init_zero {0, NULL, NULL, NULL, false, rtcvish_emulator_v1_Capabilities_init_zero}
-#define rtcvish_emulator_v1_Capabilities_init_zero {0, 0, 0, 0, 0, 0}
+#define rtcvish_emulator_v1_Capabilities_init_zero {0, 0, 0, 0, 0, 0, 0, 0}
 #define rtcvish_emulator_v1_Status_init_zero     {_rtcvish_emulator_v1_Status_State_MIN, 0, NULL, NULL, NULL, NULL}
 #define rtcvish_emulator_v1_GetStatusRequest_init_zero {0}
 #define rtcvish_emulator_v1_GetStatusResponse_init_zero {false, rtcvish_emulator_v1_Status_init_zero}
@@ -588,7 +611,7 @@ extern "C" {
 #define rtcvish_emulator_v1_ResumeResponse_init_zero {0}
 #define rtcvish_emulator_v1_StepRequest_init_zero {0}
 #define rtcvish_emulator_v1_StepResponse_init_zero {0}
-#define rtcvish_emulator_v1_Unit_init_zero       {0, NULL, 0, 0, 0, {NULL}, 0, 0, 0, 0, 0}
+#define rtcvish_emulator_v1_Unit_init_zero       {0, NULL, 0, 0, 0, {NULL}, 0, 0, 0, 0, 0, _rtcvish_emulator_v1_Mode_MIN}
 #define rtcvish_emulator_v1_StoreSource_init_zero {NULL, 0, 0}
 #define rtcvish_emulator_v1_ApplyUnitsRequest_init_zero {0, NULL}
 #define rtcvish_emulator_v1_ApplyUnitsResponse_init_zero {0}
@@ -623,6 +646,8 @@ extern "C" {
 #define rtcvish_emulator_v1_Capabilities_load_rom_tag 4
 #define rtcvish_emulator_v1_Capabilities_reset_tag 5
 #define rtcvish_emulator_v1_Capabilities_max_payload_tag 6
+#define rtcvish_emulator_v1_Capabilities_scanline_units_tag 7
+#define rtcvish_emulator_v1_Capabilities_hard_units_tag 8
 #define rtcvish_emulator_v1_HelloResponse_protocol_version_tag 1
 #define rtcvish_emulator_v1_HelloResponse_emulator_tag 2
 #define rtcvish_emulator_v1_HelloResponse_version_tag 3
@@ -671,6 +696,7 @@ extern "C" {
 #define rtcvish_emulator_v1_Unit_lifetime_tag    9
 #define rtcvish_emulator_v1_Unit_loop_tag        10
 #define rtcvish_emulator_v1_Unit_loop_delay_tag  11
+#define rtcvish_emulator_v1_Unit_mode_tag        12
 #define rtcvish_emulator_v1_ApplyUnitsRequest_units_tag 1
 #define rtcvish_emulator_v1_RemoveUnitsRequest_ids_tag 1
 #define rtcvish_emulator_v1_ListUnitsResponse_units_tag 1
@@ -886,7 +912,9 @@ X(a, STATIC,   SINGULAR, BOOL,     screenshot,        2) \
 X(a, STATIC,   SINGULAR, BOOL,     input,             3) \
 X(a, STATIC,   SINGULAR, BOOL,     load_rom,          4) \
 X(a, STATIC,   SINGULAR, BOOL,     reset,             5) \
-X(a, STATIC,   SINGULAR, UINT32,   max_payload,       6)
+X(a, STATIC,   SINGULAR, UINT32,   max_payload,       6) \
+X(a, STATIC,   SINGULAR, BOOL,     scanline_units,    7) \
+X(a, STATIC,   SINGULAR, BOOL,     hard_units,        8)
 #define rtcvish_emulator_v1_Capabilities_CALLBACK NULL
 #define rtcvish_emulator_v1_Capabilities_DEFAULT NULL
 
@@ -1060,7 +1088,8 @@ X(a, STATIC,   SINGULAR, SINT64,   tilt,              7) \
 X(a, STATIC,   SINGULAR, UINT32,   delay,             8) \
 X(a, STATIC,   SINGULAR, UINT32,   lifetime,          9) \
 X(a, STATIC,   SINGULAR, BOOL,     loop,             10) \
-X(a, STATIC,   SINGULAR, UINT32,   loop_delay,       11)
+X(a, STATIC,   SINGULAR, UINT32,   loop_delay,       11) \
+X(a, STATIC,   SINGULAR, UENUM,    mode,             12)
 #define rtcvish_emulator_v1_Unit_CALLBACK NULL
 #define rtcvish_emulator_v1_Unit_DEFAULT NULL
 #define rtcvish_emulator_v1_Unit_source_store_MSGTYPE rtcvish_emulator_v1_StoreSource
@@ -1339,7 +1368,7 @@ extern const pb_msgdesc_t rtcvish_emulator_v1_StatusEvent_msg;
 /* rtcvish_emulator_v1_StatusEvent_size depends on runtime parameters */
 #define RTCVISH_EMULATOR_V1_EMULATOR_PB_H_MAX_SIZE rtcvish_emulator_v1_SetInputRequest_size
 #define rtcvish_emulator_v1_ApplyUnitsResponse_size 0
-#define rtcvish_emulator_v1_Capabilities_size    16
+#define rtcvish_emulator_v1_Capabilities_size    20
 #define rtcvish_emulator_v1_ClearUnitsRequest_size 0
 #define rtcvish_emulator_v1_ClearUnitsResponse_size 0
 #define rtcvish_emulator_v1_CloseRomRequest_size 0

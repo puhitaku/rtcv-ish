@@ -1,6 +1,7 @@
 // Package fake is an in-process emulator that speaks the emulator API.
 // It has no CPU: its "game" only stores the frame counter as a 32-bit
-// word at offset 0 of the first domain after every frame.
+// word at offset 0 of the first domain after every frame (bytes frozen by
+// HARD units excepted).
 package fake
 
 import (
@@ -359,9 +360,13 @@ func (s *Server) runFrame() {
 	if len(s.opts.Domains) > 0 {
 		d := s.opts.Domains[0]
 		if m := s.mem[d.Name]; len(m) >= 4 {
-			putUint(m[:4], s.frame&0xffffffff, d.BigEndian)
+			var b [4]byte
+			putUint(b[:], s.frame&0xffffffff, d.BigEndian)
+			s.maskWrite(d.Name, 0, b[:])
+			copy(m, b[:])
 		}
 	}
+	s.endUnits()
 	if c := s.conn; c != nil && c.interval > 0 && s.frame%uint64(c.interval) == 0 {
 		s.emit(&emulatorv1.Event{Body: &emulatorv1.Event_Frame{Frame: &emulatorv1.FrameEvent{Frame: s.frame}}})
 	}

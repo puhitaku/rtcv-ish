@@ -132,6 +132,8 @@ void toPb(const Capabilities& in, rtcvish_emulator_v1_Capabilities& out) {
     out.load_rom = in.loadRom;
     out.reset = in.reset;
     out.max_payload = in.maxPayload;
+    out.scanline_units = in.scanlineUnits;
+    out.hard_units = in.hardUnits;
 }
 
 void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out) {
@@ -153,6 +155,7 @@ void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out) {
     out.lifetime = in.lifetime;
     out.loop = in.loop;
     out.loop_delay = in.loopDelay;
+    out.mode = rtcvish_emulator_v1_Mode(in.mode);
 }
 
 Unit fromPb(const rtcvish_emulator_v1_Unit& in) {
@@ -174,6 +177,7 @@ Unit fromPb(const rtcvish_emulator_v1_Unit& in) {
     u.lifetime = in.lifetime;
     u.loop = in.loop;
     u.loopDelay = in.loop_delay;
+    u.mode = UnitMode(in.mode);
     return u;
 }
 

@@ -34,4 +34,10 @@ nanopb (0.4.9.2). Emulator forks copy this directory verbatim
      counter, `scheduler().clear()` and call `statusChanged()`.
 5. `Backend::runFrames(n)` must make the paused emulator emulate `n` frames
    and stay paused; `Step` requests complete from `frameCompleted`.
-6. Destroy the server (or call `stop()`) before tearing down the emulator.
+6. Unit modes (optional): report `Capabilities::scanlineUnits` and call
+   `runScanline()` at every scanline of a frame (skipping the call while
+   `scheduler().scanlineActive()` is false keeps it free); report
+   `Capabilities::hardUnits` and implement `Backend::setFrozen()` by
+   dropping guest writes to the given bytes. Missing modes fall back to the
+   next weaker one.
+7. Destroy the server (or call `stop()`) before tearing down the emulator.

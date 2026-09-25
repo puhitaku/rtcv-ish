@@ -115,6 +115,12 @@ pages are write-protected so compiled code takes the slow path). An
 emulator that lacks a mode falls back to the previous one and reports
 what it supports in `Capabilities.scanline_units`/`hard_units`.
 
+While a `HARD` unit covers bytes, client `Write` requests to those bytes
+are masked as well. melonDS intercepts CPU, TCM, DMA and JIT slow-path
+writes and write-protects frozen pages under JIT fast memory; VRAM
+written through a different mapping (LCDC, mirrors, the ARM7 view),
+display capture and the DSi DSP are only covered by the scanline rewrite.
+
 A unit with `lifetime=0` never expires. The core enforces RTCV's
 "max infinite units" limit by removing the oldest ids itself.
 

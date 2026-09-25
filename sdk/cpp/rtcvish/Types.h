@@ -55,6 +55,10 @@ struct Capabilities {
     bool reset = false;
     // 0 lets the server fill in its own limit.
     uint32_t maxPayload = 0;
+    // Unit modes beyond Frame. A backend that reports hardUnits must
+    // implement Backend::setFrozen.
+    bool scanlineUnits = false;
+    bool hardUnits = false;
 };
 
 struct Info {
@@ -88,6 +92,14 @@ struct Input {
     bool clear = false;
 };
 
+// How strongly a unit's write is enforced (design/emulator-api.md, "Unit
+// scheduler"). Values match the proto enum.
+enum class UnitMode {
+    Frame = 0,
+    Scanline = 1,
+    Hard = 2,
+};
+
 // A memory write executed by the Scheduler at frame boundaries. See
 // design/emulator-api.md, "Unit scheduler".
 struct Unit {
@@ -107,6 +119,15 @@ struct Unit {
     uint32_t lifetime = 0;
     bool loop = false;
     uint32_t loopDelay = 0;
+    UnitMode mode = UnitMode::Frame;
+};
+
+// Bytes an executing HARD unit keeps at `value`: guest writes to them must
+// not change them.
+struct FrozenRange {
+    std::string domain;
+    uint64_t address = 0;
+    std::vector<uint8_t> value;
 };
 
 const Domain* findDomain(const std::vector<Domain>& domains, const std::string& name);

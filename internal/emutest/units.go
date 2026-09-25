@@ -79,6 +79,18 @@ func (u *U) Store(id, dst, src uint64, size uint32, continuous bool, tilt int64)
 
 func with(x *emulatorv1.Unit, f func(*emulatorv1.Unit)) *emulatorv1.Unit { f(x); return x }
 
+func withMode(x *emulatorv1.Unit, m emulatorv1.Mode) *emulatorv1.Unit { x.Mode = m; return x }
+
+// hard reports whether the emulator implements HARD units; cases that need
+// them return early otherwise.
+func (u *U) hard() bool {
+	if !u.c.Info().GetCapabilities().GetHardUnits() {
+		u.t.Log("emulator reports hard_units=false")
+		return false
+	}
+	return true
+}
+
 // UnitCase is one scheduler scenario.
 type UnitCase struct {
 	Name string
@@ -249,6 +261,66 @@ var UnitCases = []UnitCase{
 		u.WantIDs()
 		u.Put32(0, 0)
 		u.Step(1)
+		u.Want32(0, 0)
+	}},
+	{"modes accepted", func(u *U) {
+		u.Apply(withMode(u.Value(1, 0, le32(1)), emulatorv1.Mode_SCANLINE), withMode(u.Value(2, 4, le32(2)), emulatorv1.Mode_HARD))
+		u.Apply(withMode(u.Store(3, 8, 0, 4, true, 0), emulatorv1.Mode_SCANLINE), withMode(u.Store(4, 12, 4, 4, false, 1), emulatorv1.Mode_SCANLINE))
+		units, err := u.c.ListUnits(u.ctx)
+		must(u.t, err, "ListUnits")
+		var modes []emulatorv1.Mode
+		for _, x := range units {
+			modes = append(modes, x.GetMode())
+		}
+		want := []emulatorv1.Mode{emulatorv1.Mode_SCANLINE, emulatorv1.Mode_HARD, emulatorv1.Mode_SCANLINE, emulatorv1.Mode_SCANLINE}
+		if !slices.Equal(modes, want) {
+			u.t.Errorf("listed modes = %v, want %v", modes, want)
+		}
+		u.Step(1)
+		u.Want(0, slices.Concat(le32(1), le32(2), le32(1), le32(3)))
+	}},
+	{"mode errors", func(u *U) {
+		err := u.c.ApplyUnits(u.ctx, []*emulatorv1.Unit{withMode(u.Store(1, 0, 4, 4, true, 0), emulatorv1.Mode_HARD)})
+		WantCode(u.t, err, emulatorv1.Error_INVALID_ARGUMENT, "HARD continuous store unit")
+		err = u.c.ApplyUnits(u.ctx, []*emulatorv1.Unit{withMode(u.Store(1, 0, 4, 4, false, 0), emulatorv1.Mode_HARD)})
+		WantCode(u.t, err, emulatorv1.Error_INVALID_ARGUMENT, "HARD once store unit")
+		err = u.c.ApplyUnits(u.ctx, []*emulatorv1.Unit{withMode(u.Value(1, 0, le32(1)), emulatorv1.Mode(7))})
+		WantCode(u.t, err, emulatorv1.Error_INVALID_ARGUMENT, "unknown mode")
+		err = u.c.ApplyUnits(u.ctx, []*emulatorv1.Unit{u.Value(1, 0, le32(1)), withMode(u.Store(2, 0, 4, 4, true, 0), emulatorv1.Mode_HARD)})
+		WantCode(u.t, err, emulatorv1.Error_INVALID_ARGUMENT, "batch with a HARD store unit")
+		u.WantIDs()
+	}},
+	{"hard masks client writes", func(u *U) {
+		if !u.hard() {
+			return
+		}
+		u.Apply(withMode(u.Value(1, 2, []byte{0xaa, 0xbb}), emulatorv1.Mode_HARD))
+		// Not executing yet: nothing is frozen.
+		u.Put32(0, 0x11223344)
+		u.Want32(0, 0x11223344)
+		u.Step(1)
+		u.Want(0, []byte{0x44, 0x33, 0xaa, 0xbb})
+		u.Put32(0, 0x55667788)
+		u.Want(0, []byte{0x88, 0x77, 0xaa, 0xbb})
+		u.Put(3, []byte{0x01, 0x02})
+		u.Want(2, []byte{0xaa, 0xbb, 0x02})
+		u.Step(2)
+		u.Want(0, []byte{0x88, 0x77, 0xaa, 0xbb, 0x02})
+		must(u.t, u.c.RemoveUnits(u.ctx, []uint64{1}), "RemoveUnits")
+		u.Put32(0, 0)
+		u.Want32(0, 0)
+	}},
+	{"hard lifetime", func(u *U) {
+		if !u.hard() {
+			return
+		}
+		u.Apply(withMode(with(u.Value(1, 0, le32(0xfeedface)), func(x *emulatorv1.Unit) { x.Lifetime = 2 }), emulatorv1.Mode_HARD))
+		u.Step(1)
+		u.Put32(0, 0)
+		u.Want32(0, 0xfeedface)
+		u.Step(1)
+		u.WantIDs()
+		u.Put32(0, 0)
 		u.Want32(0, 0)
 	}},
 	{"errors", func(u *U) {

@@ -81,6 +81,15 @@ public:
 
     // Exit the emulator process. Called after the QuitResponse was sent.
     virtual void quit() = 0;
+
+    // HARD units: `ranges` replaces the set of bytes whose guest writes (CPU,
+    // DMA, ...) must be dropped, so that they keep their current contents.
+    // Ranges may overlap. Called whenever the set changes, with an empty
+    // list when no HARD unit executes, and before the emulator runs again.
+    // write() itself must not be intercepted: the scheduler uses it to
+    // establish the frozen values. Backends without Capabilities::hardUnits
+    // never receive ranges.
+    virtual void setFrozen(const std::vector<FrozenRange>& ranges) { (void)ranges; }
 };
 
 } // namespace rtcvish

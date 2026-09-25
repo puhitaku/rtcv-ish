@@ -46,6 +46,15 @@ func (s *Server) applyUnits(specs []*emulatorv1.Unit) *emulatorv1.Error {
 		default:
 			return errorf(emulatorv1.Error_INVALID_ARGUMENT, "unit %d: no source", u.GetId())
 		}
+		switch u.GetMode() {
+		case emulatorv1.Mode_FRAME, emulatorv1.Mode_SCANLINE:
+		case emulatorv1.Mode_HARD:
+			if u.GetStore() != nil {
+				return errorf(emulatorv1.Error_INVALID_ARGUMENT, "unit %d: HARD mode needs a value unit", u.GetId())
+			}
+		default:
+			return errorf(emulatorv1.Error_INVALID_ARGUMENT, "unit %d: unknown mode %d", u.GetId(), u.GetMode())
+		}
 	}
 	for _, spec := range specs {
 		s.units = append(s.units, &unit{spec: spec, wait: spec.GetDelay()})
@@ -59,8 +68,9 @@ func (s *Server) removeUnits(ids []uint64) {
 	})
 }
 
-// runUnits executes one frame of the unit scheduler as described in
-// design/emulator-api.md. s.mu must be held.
+// runUnits executes the units for the frame about to be emulated as
+// described in design/emulator-api.md. The fake has no scanlines, so
+// SCANLINE units behave like FRAME units. s.mu must be held.
 func (s *Server) runUnits() {
 	var executing []*unit
 	for _, u := range s.units {
@@ -71,9 +81,7 @@ func (s *Server) runUnits() {
 			}
 			u.running = true
 			u.executed = 0
-			if st := u.spec.GetStore(); st != nil && !st.GetContinuous() {
-				u.sample = s.sampleUnit(u.spec)
-			}
+			u.sample = nil
 		}
 		executing = append(executing, u)
 	}
@@ -81,7 +89,8 @@ func (s *Server) runUnits() {
 	for _, u := range executing {
 		data := u.spec.GetValue()
 		if st := u.spec.GetStore(); st != nil {
-			if st.GetContinuous() {
+			// Sampled when writing, so writes of earlier units are visible.
+			if st.GetContinuous() || u.sample == nil {
 				u.sample = s.sampleUnit(u.spec)
 			}
 			data = u.sample
@@ -89,7 +98,11 @@ func (s *Server) runUnits() {
 		copy(s.mem[u.spec.GetDomain()][u.spec.GetAddress():], data)
 		u.executed++
 	}
+}
 
+// endUnits retires the units whose lifetime ended in the frame just
+// emulated. s.mu must be held.
+func (s *Server) endUnits() {
 	s.units = slices.DeleteFunc(s.units, func(u *unit) bool {
 		lifetime := u.spec.GetLifetime()
 		if !u.running || lifetime == 0 || u.executed < lifetime {
@@ -102,6 +115,33 @@ func (s *Server) runUnits() {
 		u.wait = u.spec.GetLoopDelay()
 		return false
 	})
+}
+
+// rewriteHard writes the executing HARD units again, after a savestate
+// replaced memory. s.mu must be held.
+func (s *Server) rewriteHard() {
+	for _, u := range s.units {
+		if u.running && u.spec.GetMode() == emulatorv1.Mode_HARD {
+			copy(s.mem[u.spec.GetDomain()][u.spec.GetAddress():], u.spec.GetValue())
+		}
+	}
+}
+
+// maskWrite replaces the bytes of a write to domain at addr that executing
+// HARD units freeze with their values, so the write cannot change them.
+// s.mu must be held.
+func (s *Server) maskWrite(domain string, addr uint64, data []byte) {
+	for _, u := range s.units {
+		if !u.running || u.spec.GetMode() != emulatorv1.Mode_HARD || u.spec.GetDomain() != domain {
+			continue
+		}
+		v := u.spec.GetValue()
+		start := max(addr, u.spec.GetAddress())
+		end := min(addr+uint64(len(data)), u.spec.GetAddress()+uint64(len(v)))
+		for a := start; a < end; a++ {
+			data[a-addr] = v[a-u.spec.GetAddress()]
+		}
+	}
 }
 
 func (s *Server) sampleUnit(spec *emulatorv1.Unit) []byte {

@@ -44,6 +44,10 @@ func (s *Server) handle(c *conn, req *emulatorv1.Request) *emulatorv1.Response {
 				LoadRom:    true,
 				Reset_:     true,
 				MaxPayload: MaxPayload,
+				// SCANLINE runs as FRAME (there are no scanlines); HARD
+				// masks the game's and the client's writes.
+				ScanlineUnits: true,
+				HardUnits:     true,
 			},
 		}}}
 
@@ -91,7 +95,9 @@ func (s *Server) handle(c *conn, req *emulatorv1.Request) *emulatorv1.Response {
 			}
 		}
 		for _, w := range b.Write.GetChunks() {
-			copy(s.mem[w.GetDomain()][w.GetAddress():], w.GetData())
+			data := append([]byte(nil), w.GetData()...)
+			s.maskWrite(w.GetDomain(), w.GetAddress(), data)
+			copy(s.mem[w.GetDomain()][w.GetAddress():], data)
 		}
 		return &emulatorv1.Response{Body: &emulatorv1.Response_Write{Write: &emulatorv1.WriteResponse{}}}
 
@@ -122,6 +128,7 @@ func (s *Server) handle(c *conn, req *emulatorv1.Request) *emulatorv1.Response {
 		for name, m := range st.Memory {
 			copy(s.mem[name], m)
 		}
+		s.rewriteHard()
 		return &emulatorv1.Response{Body: &emulatorv1.Response_LoadState{LoadState: &emulatorv1.LoadStateResponse{}}}
 
 	case *emulatorv1.Request_LoadRom:

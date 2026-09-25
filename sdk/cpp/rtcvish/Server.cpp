@@ -105,7 +105,10 @@ struct Server::Connection {
     std::atomic<uint32_t> frameInterval{0};
 };
 
-Server::Server(Backend& backend) : backend_(backend) {}
+Server::Server(Backend& backend) : backend_(backend) {
+    scheduler_.setFrozenListener(
+        [this](const std::vector<FrozenRange>& ranges) { backend_.setFrozen(ranges); });
+}
 
 Server::~Server() {
     stop();
@@ -192,6 +195,7 @@ bool Server::start(const std::string& host, uint16_t port, std::string& err) {
     if (info_.capabilities.maxPayload == 0 || info_.capabilities.maxPayload > wire::kMaxPayload) {
         info_.capabilities.maxPayload = wire::kMaxPayload;
     }
+    scheduler_.setModes(info_.capabilities.scanlineUnits, info_.capabilities.hardUnits);
 
     listenFd_ = intptr_t(fd);
     stopping_ = false;
@@ -573,8 +577,11 @@ void Server::runJob(const ConnPtr& conn, const MsgPtr& msg) {
         for (pb_size_t i = 0; i < rq.chunks_count && ok; i++) {
             const auto& ch = rq.chunks[i];
             if (ch.data && ch.data->size > 0) {
-                ok = backend_.write(wire::toString(ch.domain), ch.address, ch.data->bytes,
-                                    ch.data->size, err);
+                // Bytes frozen by HARD units keep their value (the chunk is
+                // owned by this request, so it can be patched in place).
+                std::string name = wire::toString(ch.domain);
+                scheduler_.maskWrite(name, ch.address, ch.data->bytes, ch.data->size);
+                ok = backend_.write(name, ch.address, ch.data->bytes, ch.data->size, err);
             }
         }
         if (!ok) {
@@ -611,6 +618,9 @@ void Server::runJob(const ConnPtr& conn, const MsgPtr& msg) {
         } else if (!backend_.loadState(data->bytes, data->size, err)) {
             wire::setError(resp, err);
         } else {
+            // Units survive LoadState; restore what SCANLINE and HARD units
+            // enforce right away instead of at the next scanline.
+            scheduler_.rewrite(backend_);
             resp.which_body = rtcvish_emulator_v1_Response_load_state_tag;
         }
         break;
@@ -810,7 +820,12 @@ void Server::runFrame() {
     scheduler_.runFrame(backend_);
 }
 
+void Server::runScanline() {
+    scheduler_.runScanline(backend_);
+}
+
 void Server::frameCompleted(uint64_t frame) {
+    scheduler_.endFrame();
     {
         std::lock_guard<std::mutex> lk(statusMu_);
         status_.frame = frame;

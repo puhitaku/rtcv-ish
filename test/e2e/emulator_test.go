@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -43,7 +44,8 @@ func TestHello(t *testing.T) {
 		t.Errorf("hello = %v, want protocol 1, system nds and a version", info)
 	}
 	caps := info.GetCapabilities()
-	if !caps.GetSavestates() || !caps.GetScreenshot() || !caps.GetInput() || !caps.GetLoadRom() || !caps.GetReset_() {
+	if !caps.GetSavestates() || !caps.GetScreenshot() || !caps.GetInput() || !caps.GetLoadRom() || !caps.GetReset_() ||
+		!caps.GetScanlineUnits() || !caps.GetHardUnits() {
 		t.Errorf("capabilities = %v, want all features", caps)
 	}
 	if caps.GetMaxPayload() < 16<<20 {
@@ -190,6 +192,89 @@ func TestSaveState(t *testing.T) {
 func TestUnits(t *testing.T) {
 	e, _ := started(t)
 	emutest.RunUnits(t, e.Client, unitScratch)
+}
+
+// hello_world.nds increments a frame counter in MainRAM from its VBlank
+// handler, which the unit modes are checked against.
+func TestUnitModes(t *testing.T) {
+	if JIT() {
+		// The nds-examples ROMs (libnds/calico) do not boot under the
+		// upstream JIT: the ARM9 ends up on the BKPT in front of calico's
+		// exception stubs in ITCM (0x01FF84F0). TestUnitModesCounterROM
+		// covers the JIT.
+		t.Skip("nds-examples ROMs do not run under the melonDS JIT")
+	}
+	e, _ := started(t)
+	counter := emutest.FindCounter(t, e.Client, "MainRAM")
+	t.Logf("counter at %s", counter)
+	emutest.RunModes(t, e.Client, counter, true)
+}
+
+// The counter ROM runs with and without the JIT and updates one word with
+// a CPU store and another one through DMA.
+func TestUnitModesCounterROM(t *testing.T) {
+	e := StartMelonDS(t, "")
+	ctx := testCtx(t)
+	if _, err := e.LoadRom(ctx, CounterROM(t)); err != nil {
+		t.Fatal(err)
+	}
+	if c := emutest.FindCounter(t, e.Client, "MainRAM"); c.Base != CounterCPU {
+		t.Fatalf("FindCounter = %s, want MainRAM+%#x", c, CounterCPU)
+	}
+	t.Logf("JIT %v, fast memory %v", JIT(), JIT() && jitFastMemory())
+	t.Run("cpu", func(t *testing.T) {
+		emutest.RunModes(t, e.Client, emutest.Scratch{Domain: "MainRAM", Base: CounterCPU}, true)
+	})
+	t.Run("dma", func(t *testing.T) {
+		emutest.RunModes(t, e.Client, emutest.Scratch{Domain: "MainRAM", Base: CounterDMA}, true)
+	})
+
+	// SCANLINE restores the value before the frame ends, but the game
+	// still observes its own write; HARD drops the write.
+	for _, c := range []struct {
+		name             string
+		target, observed uint64
+	}{
+		{"cpu store not observed", CounterCPU, ObservedCPU},
+		{"dma write not observed", CounterDMA, ObservedDMA},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			observed := func() uint32 {
+				t.Helper()
+				b, err := e.ReadOne(ctx, "MainRAM", c.observed, 4)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return binary.LittleEndian.Uint32(b)
+			}
+			const frozen = 0x13570000
+			for _, mode := range []emulatorv1.Mode{emulatorv1.Mode_SCANLINE, emulatorv1.Mode_HARD} {
+				if err := e.ClearUnits(ctx); err != nil {
+					t.Fatal(err)
+				}
+				u := &emulatorv1.Unit{Id: 1, Domain: "MainRAM", Address: c.target, Size: 4, Mode: mode,
+					Source: &emulatorv1.Unit_Value{Value: binary.LittleEndian.AppendUint32(nil, frozen)}}
+				if err := e.ApplyUnits(ctx, []*emulatorv1.Unit{u}); err != nil {
+					t.Fatal(err)
+				}
+				for range 3 {
+					if _, err := e.Step(ctx, 1); err != nil {
+						t.Fatal(err)
+					}
+					got := observed()
+					if mode == emulatorv1.Mode_HARD && got != frozen {
+						t.Errorf("HARD: game observed %#x, want the frozen %#x", got, frozen)
+					}
+					if mode == emulatorv1.Mode_SCANLINE && got == frozen {
+						t.Errorf("SCANLINE: game observed the frozen %#x, want its own write", got)
+					}
+				}
+			}
+			if err := e.ClearUnits(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestScreenshotAndInput(t *testing.T) {

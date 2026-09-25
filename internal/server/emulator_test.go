@@ -116,7 +116,7 @@ func TestConnectDisconnect(t *testing.T) {
 	}
 	want := gen.EmulatorInfo{
 		Name: "fake", Version: "0", System: "nds", ProtocolVersion: 1,
-		Capabilities: gen.Capabilities{Savestates: true, Screenshot: true, Input: true, LoadRom: true, Reset: true, MaxPayload: fake.MaxPayload},
+		Capabilities: gen.Capabilities{Savestates: true, Screenshot: true, Input: true, LoadRom: true, Reset: true, MaxPayload: fake.MaxPayload, ScanlineUnits: true, HardUnits: true},
 	}
 	if st.Emulator == nil || *st.Emulator != want {
 		t.Errorf("emulator = %+v, want %+v", st.Emulator, want)

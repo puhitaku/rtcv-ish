@@ -1,5 +1,6 @@
 #include "Scheduler.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace rtcvish {
@@ -48,6 +49,32 @@ bool validate(const Unit& u, const std::vector<Domain>& domains, Error& err) {
     } else if (u.value.size() != u.size) {
         return err.set(ErrorCode::InvalidArgument, prefix + "value length does not match size");
     }
+    switch (u.mode) {
+    case UnitMode::Frame:
+    case UnitMode::Scanline:
+        break;
+    case UnitMode::Hard:
+        if (u.isStore) {
+            return err.set(ErrorCode::InvalidArgument, prefix + "HARD mode needs a value unit");
+        }
+        break;
+    default:
+        return err.set(ErrorCode::InvalidArgument,
+                       prefix + "unknown mode " + std::to_string(int(u.mode)));
+    }
+    return true;
+}
+
+bool sameRanges(const std::vector<FrozenRange>& a, const std::vector<FrozenRange>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); i++) {
+        if (a[i].domain != b[i].domain || a[i].address != b[i].address ||
+            a[i].value != b[i].value) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -66,6 +93,11 @@ void applyTilt(std::vector<uint8_t>& buf, int64_t tilt, bool bigEndian) {
 }
 
 } // namespace
+
+void Scheduler::setModes(bool scanline, bool hard) {
+    scanlineSupported_ = scanline;
+    hardSupported_ = hard;
+}
 
 bool Scheduler::apply(const std::vector<Unit>& units, const std::vector<Domain>& domains,
                       Error& err) {
@@ -87,6 +119,13 @@ bool Scheduler::apply(const std::vector<Unit>& units, const std::vector<Domain>&
         e.unit = u;
         e.wait = u.delay;
         e.bigEndian = findDomain(domains, u.domain)->bigEndian;
+        e.mode = u.mode;
+        if (e.mode == UnitMode::Hard && !hardSupported_) {
+            e.mode = UnitMode::Scanline;
+        }
+        if (e.mode == UnitMode::Scanline && !scanlineSupported_) {
+            e.mode = UnitMode::Frame;
+        }
         entries_.push_back(std::move(e));
     }
     return true;
@@ -95,10 +134,12 @@ bool Scheduler::apply(const std::vector<Unit>& units, const std::vector<Domain>&
 void Scheduler::remove(const std::vector<uint64_t>& ids) {
     std::unordered_set<uint64_t> set(ids.begin(), ids.end());
     entries_.remove_if([&](const Entry& e) { return set.count(e.unit.id) != 0; });
+    refresh();
 }
 
 void Scheduler::clear() {
     entries_.clear();
+    refresh();
 }
 
 std::vector<Unit> Scheduler::list() const {
@@ -124,6 +165,23 @@ bool Scheduler::sample(Backend& backend, Entry& e) {
     return true;
 }
 
+void Scheduler::write(Backend& backend, Entry& e) {
+    const Unit& u = e.unit;
+    Error err;
+    if (!u.isStore) {
+        backend.write(u.domain, u.address, u.value.data(), u.size, err);
+        return;
+    }
+    // Sampled right before writing, so that writes of earlier units are
+    // visible. Once-units keep their first sample.
+    if (u.continuous || e.sample.empty()) {
+        sample(backend, e);
+    }
+    if (e.sample.size() == u.size) {
+        backend.write(u.domain, u.address, e.sample.data(), u.size, err);
+    }
+}
+
 void Scheduler::runFrame(Backend& backend) {
     for (auto& e : entries_) {
         if (!e.executing) {
@@ -135,23 +193,21 @@ void Scheduler::runFrame(Backend& backend) {
             e.executed = 0;
             e.sample.clear();
         }
-        const Unit& u = e.unit;
-        Error err;
-        if (!u.isStore) {
-            backend.write(u.domain, u.address, u.value.data(), u.size, err);
-        } else {
-            // Sampled right before writing, so that writes of earlier units
-            // in this frame are visible. Once-units keep their first sample.
-            if (u.continuous || e.sample.empty()) {
-                sample(backend, e);
-            }
-            if (e.sample.size() == u.size) {
-                backend.write(u.domain, u.address, e.sample.data(), u.size, err);
-            }
-        }
+        write(backend, e);
         e.executed++;
     }
+    refresh();
+}
 
+void Scheduler::rewrite(Backend& backend) {
+    for (auto& e : entries_) {
+        if (e.executing && e.mode != UnitMode::Frame) {
+            write(backend, e);
+        }
+    }
+}
+
+void Scheduler::endFrame() {
     for (auto it = entries_.begin(); it != entries_.end();) {
         const Unit& u = it->unit;
         if (!it->executing || u.lifetime == 0 || it->executed < u.lifetime) {
@@ -166,6 +222,43 @@ void Scheduler::runFrame(Backend& backend) {
         it->wait = u.loopDelay;
         it->sample.clear();
         ++it;
+    }
+    refresh();
+}
+
+void Scheduler::refresh() {
+    size_t scanline = 0;
+    std::vector<FrozenRange> frozen;
+    for (const auto& e : entries_) {
+        if (!e.executing || e.mode == UnitMode::Frame) {
+            continue;
+        }
+        scanline++;
+        if (e.mode == UnitMode::Hard) {
+            frozen.push_back(FrozenRange{e.unit.domain, e.unit.address, e.unit.value});
+        }
+    }
+    scanlineUnits_ = scanline;
+    if (sameRanges(frozen, frozen_)) {
+        return;
+    }
+    frozen_ = std::move(frozen);
+    if (listener_) {
+        listener_(frozen_);
+    }
+}
+
+void Scheduler::maskWrite(const std::string& domain, uint64_t address, uint8_t* data,
+                          size_t size) const {
+    for (const auto& r : frozen_) {
+        if (r.domain != domain) {
+            continue;
+        }
+        uint64_t start = std::max(address, r.address);
+        uint64_t end = std::min(address + size, r.address + r.value.size());
+        for (uint64_t a = start; a < end; a++) {
+            data[a - address] = r.value[a - r.address];
+        }
     }
 }
 

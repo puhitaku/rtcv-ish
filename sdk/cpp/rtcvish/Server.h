@@ -11,7 +11,7 @@
 //       server.pollJobs();                // every iteration, running or paused
 //       if (frame will be emulated) {
 //           server.runFrame();            // unit scheduler, before emulating
-//           emulateFrame();
+//           emulateFrame();               // server.runScanline() per scanline
 //           server.frameCompleted(++frameCounter);
 //       } else {
 //           server.waitForJobs(timeout);  // instead of sleeping while paused
@@ -74,6 +74,10 @@ public:
 
     // Execute the unit scheduler for the frame about to be emulated.
     void runFrame();
+
+    // Rewrite SCANLINE and HARD units; call at every scanline of the frame
+    // (only needed while scheduler().scanlineActive()).
+    void runScanline();
 
     // Report an emulated frame; `frame` is the backend's frame counter after
     // the frame. Sends FrameEvents and completes Step requests.
