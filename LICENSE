@@ -51,14 +51,6 @@ SPDX: GPL-3.0-or-later
 License: /references/melonds50x-vanguard/LICENSE
 
 
-** nds-examples (devkitPro) **
-
-URL: https://github.com/devkitPro/nds-examples
-Copyright: none stated
-SPDX: NONE
-License: none. The repository has no LICENSE file; only individual files carry notices (e.g. Graphics/3D/Picking/source/main.cpp is public domain).
-
-
 ** nanopb **
 
 URL: https://github.com/nanopb/nanopb

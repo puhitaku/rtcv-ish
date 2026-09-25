@@ -16,9 +16,11 @@ Read `design/architecture.md` first; other design docs are in `design/`.
 - `sdk/cpp` C++ emulator SDK, copied verbatim into emulator forks.
 - `web/` Vue 3 frontend, embedded into the core.
 - `emulators/melonds` melonDS fork submodule, branch `rtcv-ish`.
-- `references/` read-only submodules (RTCV, Vanguard melonDS, nds-examples).
-  Never modify them. Test ROMs: `references/nds-examples/bin/*.nds`
-  (build with `scripts/build-nds-examples.sh`).
+- `references/` read-only submodules (RTCV, Vanguard melonDS). Never
+  modify them.
+- Test ROMs: `test/roms/*.nds` (gitignored). `scripts/build-nds-examples.sh`
+  fetches devkitPro nds-examples and builds them with native devkitARM
+  (`$DEVKITPRO`) or Docker; the e2e harness runs it when a ROM is missing.
 - `test/e2e` tests that drive a real melonDS (`RTCVISH_MELONDS=/path/to/melonDS`).
 
 ## Rules

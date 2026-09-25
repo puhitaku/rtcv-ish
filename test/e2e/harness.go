@@ -2,7 +2,8 @@
 //
 // Set RTCVISH_MELONDS to the melonDS executable (or its .app bundle on
 // macOS). RTCVISH_ROM_DIR overrides the test ROM directory, which defaults
-// to references/nds-examples/bin.
+// to test/roms. Missing default ROMs are built once with
+// scripts/build-nds-examples.sh.
 package e2e
 
 import (
@@ -28,6 +29,8 @@ const (
 	stopTimeout = 5 * time.Second
 )
 
+// melonDSConfig mutes audio. [Instance0] must be declared explicitly: melonDS
+// fails to save a config where it is only an implicit parent table.
 const melonDSConfig = `LimitFPS = true
 
 [3D]
@@ -35,6 +38,11 @@ Renderer = 0
 
 [Screen]
 UseGL = false
+
+[Instance0]
+
+[Instance0.Audio]
+Volume = 0
 `
 
 // Emulator is a melonDS process with a connected client.
@@ -80,19 +88,42 @@ func MelonDSPath(t testing.TB) string {
 	return p
 }
 
-// ROM returns the path of a test ROM.
+var (
+	buildROMsOnce   sync.Once
+	buildROMsOutput []byte
+	buildROMsErr    error
+)
+
+// ROM returns the path of a test ROM. When the default ROM directory lacks
+// it, scripts/build-nds-examples.sh is run once per test binary.
 func ROM(t testing.TB, name string) string {
 	t.Helper()
 	dir := os.Getenv("RTCVISH_ROM_DIR")
 	if dir == "" {
-		dir = filepath.Join(repoRoot(t), "references", "nds-examples", "bin")
+		dir = filepath.Join(repoRoot(t), "test", "roms")
 	}
 	p, err := filepath.Abs(filepath.Join(dir, name))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	if os.Getenv("RTCVISH_ROM_DIR") != "" {
+		t.Fatalf("test ROM missing from RTCVISH_ROM_DIR: %s", p)
+	}
+	buildROMsOnce.Do(func() {
+		t.Logf("test ROM %s missing; running scripts/build-nds-examples.sh", name)
+		cmd := exec.Command(filepath.Join(repoRoot(t), "scripts", "build-nds-examples.sh"))
+		cmd.Dir = repoRoot(t)
+		buildROMsOutput, buildROMsErr = cmd.CombinedOutput()
+		t.Logf("build-nds-examples.sh output:\n%s", buildROMsOutput)
+	})
+	if buildROMsErr != nil {
+		t.Fatalf("scripts/build-nds-examples.sh failed: %v\n%s", buildROMsErr, buildROMsOutput)
+	}
 	if _, err := os.Stat(p); err != nil {
-		t.Fatalf("test ROM missing (build them with scripts/build-nds-examples.sh or set RTCVISH_ROM_DIR): %v", err)
+		t.Fatalf("test ROM missing after scripts/build-nds-examples.sh: %v", err)
 	}
 	return p
 }

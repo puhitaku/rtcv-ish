@@ -2,20 +2,28 @@ import { expect, test, type Page } from '@playwright/test'
 
 const base = () => process.env.E2E_BASE_URL!
 const emuAddr = () => process.env.E2E_EMU_ADDR!
+const rom = () => process.env.E2E_ROM!
+const realEmu = !!process.env.E2E_REAL_EMU
 const tid = (page: Page, id: string) => page.getByTestId(id)
+
+// A real emulator boots and runs slower than the fake one.
+if (realEmu) test.describe.configure({ timeout: 120_000 })
 
 test('connect, blast, harvest, edit and export', async ({ page }) => {
   await page.goto(base())
   await expect(tid(page, 'emulator-label')).toHaveText('disconnected')
 
-  // Connect to the fake emulator and load a ROM.
+  // Connect to the emulator and load a ROM.
   await tid(page, 'connection-status').click()
   await tid(page, 'connect-address').fill(emuAddr())
   await tid(page, 'connect-button').click()
   await expect(tid(page, 'emulator-label')).not.toHaveText('disconnected')
-  await tid(page, 'rom-path').fill('/roms/e2e.nds')
+  await tid(page, 'rom-path').fill(rom())
   await tid(page, 'rom-load').click()
-  await expect(tid(page, 'game-title')).not.toHaveText('no ROM')
+  await expect(tid(page, 'game-title')).not.toHaveText('no ROM', {
+    timeout: realEmu ? 30_000 : undefined,
+  })
+  await expect(tid(page, 'game-title')).not.toHaveText('')
   await page.keyboard.press('Escape')
   await tid(page, 'frame-counter').click()
 
@@ -87,6 +95,42 @@ test('connect, blast, harvest, edit and export', async ({ page }) => {
   expect(path).toBeTruthy()
 
   // No errors surfaced during the flow.
+  await expect(tid(page, 'toast')).toHaveCount(0)
+})
+
+test('real emulator: scheduled units and screenshot', async ({ page, request }) => {
+  test.skip(!realEmu, 'needs RTCVISH_MELONDS')
+  await page.goto(base())
+  await expect(tid(page, 'emulator-label')).not.toHaveText('disconnected')
+  await expect(tid(page, 'game-title')).not.toHaveText('no ROM')
+
+  // Hellgenie units live forever, so they stay listed after the blast.
+  const patched = await request.patch(`${base()}/api/settings`, {
+    data: { engine: 'hellgenie', intensity: 4 },
+  })
+  expect(patched.ok()).toBe(true)
+  await page.reload()
+  await tid(page, 'nav-engine').click()
+  await tid(page, 'manual-blast').click()
+  await expect(tid(page, 'log-strip')).toContainText('blast: 4 units')
+  await expect
+    .poll(async () => {
+      const r = await request.get(`${base()}/api/blast/units`)
+      return r.ok() ? ((await r.json()) as unknown[]).length : -1
+    })
+    .toBeGreaterThan(0)
+
+  // The Memory panel shows a screenshot of the running game.
+  await tid(page, 'nav-memory').click()
+  await tid(page, 'screenshot-refresh').click()
+  const shot = tid(page, 'screenshot')
+  await expect(shot).toBeVisible()
+  await expect
+    .poll(() => shot.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+    .toBeGreaterThan(0)
+
+  expect((await request.delete(`${base()}/api/blast/units`)).ok()).toBe(true)
+  await request.patch(`${base()}/api/settings`, { data: { engine: 'nightmare' } })
   await expect(tid(page, 'toast')).toHaveCount(0)
 })
 

@@ -83,9 +83,10 @@ rtcv-ish/
   sdk/cpp/               C++ emulator SDK (vendored into emulator forks)
   web/                   Vue frontend (Vite, Pinia, Tailwind, Vitest, Playwright)
   emulators/melonds/     git submodule: melonDS fork, branch rtcv-ish
-  references/            git submodules: RTCV, Vanguard melonDS, nds-examples (read-only)
+  references/            git submodules: RTCV, Vanguard melonDS (read-only)
   scripts/               code generation, SDK sync, ROM build helpers
   test/e2e/              end-to-end tests that drive a real emulator
+  test/roms/             test ROMs built from devkitPro nds-examples (gitignored)
   .github/workflows/     CI and release
   prompts/               task prompts given to the agents
 ```
@@ -114,7 +115,7 @@ that a plain `go build` works without generators installed.
 | Layer | Tool | Needs |
 |---|---|---|
 | Core unit tests | `go test ./...` with the fake emulator | nothing |
-| Core vs. real emulator | `go test ./test/e2e` | `RTCVISH_MELONDS` pointing at a built melonDS, ROMs from `references/nds-examples/bin` |
+| Core vs. real emulator | `go test ./test/e2e` | `RTCVISH_MELONDS` pointing at a built melonDS, ROMs in `test/roms` (built on demand by `scripts/build-nds-examples.sh`) |
 | Frontend unit tests | Vitest | Node |
 | Frontend E2E | Playwright against `rtcv-ish` + fake emulator | Node, Go |
 | Full E2E | Playwright against `rtcv-ish` + melonDS | all of the above |
