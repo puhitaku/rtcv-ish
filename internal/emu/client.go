@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,10 +24,21 @@ const (
 	clientName      = "rtcv-ish"
 )
 
+// Default per-call timeouts. Calls that transfer or build a whole console
+// state get the long timeout; Step gets the short one plus the time the
+// frames take at 30 fps.
+const (
+	DefaultCallTimeout     = 5 * time.Second
+	DefaultLongCallTimeout = 30 * time.Second
+)
+
 type options struct {
 	logger      *slog.Logger
 	eventBuffer int
 	clientName  string
+	callTimeout time.Duration
+	longTimeout time.Duration
+	onTimeout   func(*Client, *TimeoutError)
 }
 
 // Option configures Dial.
@@ -39,11 +51,31 @@ func WithEventBuffer(n int) Option { return func(o *options) { o.eventBuffer = m
 
 func WithClientName(name string) Option { return func(o *options) { o.clientName = name } }
 
+// WithCallTimeouts overrides DefaultCallTimeout and DefaultLongCallTimeout.
+// Zero keeps the default.
+func WithCallTimeouts(call, long time.Duration) Option {
+	return func(o *options) {
+		if call > 0 {
+			o.callTimeout = call
+		}
+		if long > 0 {
+			o.longTimeout = long
+		}
+	}
+}
+
+// WithTimeoutHandler calls f, on the calling goroutine, whenever a call
+// fails because its per-call timeout expired.
+func WithTimeoutHandler(f func(*Client, *TimeoutError)) Option {
+	return func(o *options) { o.onTimeout = f }
+}
+
 // Client is a connection to one emulator. It is safe for concurrent use.
 type Client struct {
 	conn net.Conn
 	log  *slog.Logger
 	info *emulatorv1.HelloResponse
+	opts options
 
 	writeMu deadlock.Mutex
 
@@ -70,7 +102,13 @@ type Client struct {
 // ctx bounds the dial and the handshake only; the connection lives until
 // Close is called or the emulator disconnects.
 func Dial(ctx context.Context, addr string, opts ...Option) (*Client, error) {
-	o := options{logger: slog.Default(), eventBuffer: 256, clientName: clientName}
+	o := options{
+		logger:      slog.Default(),
+		eventBuffer: 256,
+		clientName:  clientName,
+		callTimeout: DefaultCallTimeout,
+		longTimeout: DefaultLongCallTimeout,
+	}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -102,6 +140,7 @@ func newClient(conn net.Conn, o options) *Client {
 	c := &Client{
 		conn:      conn,
 		log:       o.logger.With("emulator", conn.RemoteAddr().String()),
+		opts:      o,
 		pending:   make(map[uint32]chan *emulatorv1.Response),
 		queueMax:  o.eventBuffer,
 		queueWake: make(chan struct{}, 1),
@@ -157,6 +196,22 @@ func (c *Client) call(ctx context.Context, req *emulatorv1.Request) (*emulatorv1
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	d := c.timeoutFor(req)
+	terr := &TimeoutError{Request: requestName(req), After: d}
+	ctx, cancel := context.WithTimeoutCause(ctx, d, terr)
+	defer cancel()
+	resp, err := c.roundTrip(ctx, req)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && context.Cause(ctx) == terr {
+		c.log.Warn("emulator call timed out", "request", terr.Request, "after", d)
+		if c.opts.onTimeout != nil {
+			c.opts.onTimeout(c, terr)
+		}
+		return nil, terr
+	}
+	return resp, err
+}
+
+func (c *Client) roundTrip(ctx context.Context, req *emulatorv1.Request) (*emulatorv1.Response, error) {
 	ch := make(chan *emulatorv1.Response, 1)
 	c.mu.Lock()
 	if c.pending == nil {
@@ -188,6 +243,21 @@ func (c *Client) call(ctx context.Context, req *emulatorv1.Request) (*emulatorv1
 			return nil, c.Err()
 		}
 	}
+}
+
+// timeoutFor is the per-call timeout of a request.
+func (c *Client) timeoutFor(req *emulatorv1.Request) time.Duration {
+	switch b := req.GetBody().(type) {
+	case *emulatorv1.Request_LoadRom, *emulatorv1.Request_LoadState, *emulatorv1.Request_SaveState:
+		return c.opts.longTimeout
+	case *emulatorv1.Request_Step:
+		return c.opts.callTimeout + time.Duration(b.Step.GetFrames())*time.Second/30
+	}
+	return c.opts.callTimeout
+}
+
+func requestName(req *emulatorv1.Request) string {
+	return strings.TrimPrefix(fmt.Sprintf("%T", req.GetBody()), "*emulatorv1.Request_")
 }
 
 func result(resp *emulatorv1.Response) (*emulatorv1.Response, error) {

@@ -27,6 +27,9 @@ type Config struct {
 	Emulators []EmulatorSpec
 	// Version is reported in Status.version; empty means "dev".
 	Version string
+	// Timeouts tunes emulator call and operation timeouts; zero fields
+	// use the defaults.
+	Timeouts session.Timeouts
 }
 
 // Option configures New.
@@ -64,6 +67,7 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Server, error) {
 		Logger:    cfg.Logger,
 		Emulators: cfg.Emulators,
 		Version:   cfg.Version,
+		Timeouts:  cfg.Timeouts,
 	})
 	if err != nil {
 		cancel()

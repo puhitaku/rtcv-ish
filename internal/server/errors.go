@@ -28,6 +28,8 @@ const (
 	CodeConnectFailed        = "CONNECT_FAILED"
 	CodeFailed               = "FAILED"
 	CodeEmulatorDisconnected = "EMULATOR_DISCONNECTED"
+	CodeEmulatorUnresponsive = "EMULATOR_UNRESPONSIVE"
+	CodeEmulatorTimeout      = "EMULATOR_TIMEOUT"
 	CodeNotImplemented       = "NOT_IMPLEMENTED"
 	CodeInternal             = "INTERNAL"
 )
@@ -59,6 +61,8 @@ var sessionCodes = map[session.Kind]struct {
 	session.KindNoBackup:         {http.StatusConflict, CodeNoBackup},
 	session.KindConnectFailed:    {http.StatusBadGateway, CodeConnectFailed},
 	session.KindDisconnected:     {http.StatusServiceUnavailable, CodeEmulatorDisconnected},
+	session.KindBusy:             {http.StatusConflict, CodeBusy},
+	session.KindUnresponsive:     {http.StatusServiceUnavailable, CodeEmulatorUnresponsive},
 }
 
 var emuCodes = map[emulatorv1.Error_Code]struct {
@@ -93,6 +97,9 @@ func toAPIError(err error) *apiError {
 			return &apiError{Status: m.status, Code: m.code, Msg: ee.Error()}
 		}
 		return &apiError{Status: http.StatusBadGateway, Code: CodeFailed, Msg: ee.Error()}
+	}
+	if errors.Is(err, emu.ErrTimeout) {
+		return &apiError{Status: http.StatusGatewayTimeout, Code: CodeEmulatorTimeout, Msg: err.Error()}
 	}
 	if errors.Is(err, emu.ErrClosed) {
 		return &apiError{Status: errDisconnected.Status, Code: errDisconnected.Code, Msg: err.Error()}

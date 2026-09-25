@@ -11,13 +11,7 @@ import (
 	"github.com/puhitaku/rtcv-ish/internal/emu"
 )
 
-// memLocked is the emulator memory for generation and rasterization. c
-// may be nil when only the domain list is needed.
-func (s *Session) memLocked(c *emu.Client) corrupt.Memory {
-	return corrupt.EmuMemory(c, s.protoDomains)
-}
-
-func (s *Session) nextIDLocked() uint64 {
+func (s *Session) nextID() uint64 {
 	s.nextUnitID++
 	return s.nextUnitID
 }
@@ -34,141 +28,178 @@ func usesLists(st *corrupt.Settings) bool {
 	return false
 }
 
-// generateLocked builds a layer with the current settings on the selected
-// domains.
-func (s *Session) generateLocked(ctx context.Context) (*corrupt.Layer, error) {
-	c, err := s.romLocked()
-	if err != nil {
-		return nil, err
-	}
-	if err := s.syncDomainsLocked(ctx); err != nil {
-		return nil, err
-	}
-	if len(s.selected) == 0 {
-		return nil, errorf(KindInvalid, "no domains selected")
-	}
-	var mem corrupt.Memory = s.memLocked(c)
-	if usesLists(s.settings) {
-		mem = corrupt.NewSnapshot(mem)
-	}
-	l, err := corrupt.Generate(ctx, s.rng, s.settings, s.selected, mem, s.lists)
-	if err != nil {
-		return nil, invalid(err)
-	}
-	return l, nil
+// generated is a layer and the settings and selection it was built with.
+type generated struct {
+	layer    *corrupt.Layer
+	settings *corrupt.Settings
+	selected []string
 }
 
-func (s *Session) publishBlast(l *corrupt.Layer, start time.Time) {
+// generate builds a layer with the current settings on the selected
+// domains. The caller holds the gate.
+func (s *Session) generate(ctx context.Context, cn *conn) (generated, error) {
+	if err := s.syncDomains(ctx, cn); err != nil {
+		return generated{}, err
+	}
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return generated{}, errDisconnected
+	}
+	if s.game.State == StateNoRom {
+		s.mu.Unlock()
+		return generated{}, errorf(KindNoROM, "no ROM loaded")
+	}
+	g := generated{settings: s.settings.Clone(), selected: slices.Clone(s.selected)}
+	reg, pd := s.lists, s.protoDomains
+	s.mu.Unlock()
+	if len(g.selected) == 0 {
+		return generated{}, errorf(KindInvalid, "no domains selected")
+	}
+	var mem corrupt.Memory = corrupt.EmuMemory(cn.client, pd)
+	if usesLists(g.settings) {
+		mem = corrupt.NewSnapshot(mem)
+	}
+	l, err := corrupt.Generate(ctx, s.rng, g.settings, g.selected, mem, reg)
+	if err != nil {
+		return generated{}, invalid(err)
+	}
+	g.layer = l
+	return g, nil
+}
+
+func (s *Session) publishBlast(l *corrupt.Layer, engine corrupt.Engine, start time.Time) {
 	s.broker.publish(Event{Type: EventBlast, Data: BlastEvent{
 		Count:     len(l.Units),
-		Engine:    string(s.settings.Engine),
+		Engine:    string(engine),
 		ElapsedMs: float64(time.Since(start).Microseconds()) / 1000,
 	}})
 }
 
 // Blast generates a layer with the current settings and applies it.
 func (s *Session) Blast(ctx context.Context) (*corrupt.Layer, error) {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.blastLocked(ctx, true)
-}
-
-func (s *Session) blastLocked(ctx context.Context, followMax bool) (*corrupt.Layer, error) {
-	start := time.Now()
-	l, err := s.generateLocked(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.applyLocked(ctx, l, false, followMax); err != nil {
-		return nil, err
-	}
-	s.publishBlast(l, start)
-	return l, nil
-}
-
-// applyLocked rasterizes and schedules a layer. With backup, the current
-// bytes at every unit are stored for Toggle. With followMax, the oldest
-// infinite units beyond maxInfiniteUnits are removed unless lockUnits is
-// set.
-func (s *Session) applyLocked(ctx context.Context, l *corrupt.Layer, backup, followMax bool) error {
-	c, err := s.clientLocked()
-	if err != nil {
+	var l *corrupt.Layer
+	err := s.withOp(ctx, "blast", func(ctx context.Context) (err error) {
+		l, err = s.blast(ctx, true)
 		return err
+	})
+	return l, err
+}
+
+func (s *Session) blast(ctx context.Context, followMax bool) (*corrupt.Layer, error) {
+	cn, err := s.currentROM()
+	if err != nil {
+		return nil, err
 	}
-	mem := s.memLocked(c)
+	start := time.Now()
+	g, err := s.generate(ctx, cn)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.apply(ctx, cn, g.layer, false, followMax); err != nil {
+		return nil, err
+	}
+	s.publishBlast(g.layer, g.settings.Engine, start)
+	return g.layer, nil
+}
+
+// apply rasterizes and schedules a layer. With backup, the current bytes
+// at every unit are stored for Toggle. With followMax, the oldest infinite
+// units beyond maxInfiniteUnits are removed unless lockUnits is set.
+func (s *Session) apply(ctx context.Context, cn *conn, l *corrupt.Layer, backup, followMax bool) error {
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return errDisconnected
+	}
+	pd := s.protoDomains
+	lockUnits, maxInfinite := s.settings.LockUnits, s.settings.MaxInfiniteUnits
+	s.mu.Unlock()
+	mem := corrupt.EmuMemory(cn.client, pd)
 	var bk *corrupt.Layer
+	var err error
 	if backup {
 		if bk, err = l.Backup(ctx, mem); err != nil {
 			return invalid(err)
 		}
 	}
-	units, err := corrupt.Rasterize(ctx, l, mem, s.nextIDLocked)
+	units, err := corrupt.Rasterize(ctx, l, mem, s.nextID)
 	if err != nil {
 		return invalid(err)
 	}
-	if err := s.scheduleLocked(ctx, c, units); err != nil {
+	if err := s.schedule(ctx, cn, units); err != nil {
 		return err
 	}
-	if followMax && !s.settings.LockUnits {
-		if n := len(s.infinite) - s.settings.MaxInfiniteUnits; n > 0 {
-			if err := c.RemoveUnits(ctx, s.infinite[:n]); err != nil {
+	if followMax && !lockUnits {
+		var drop []uint64
+		s.mu.Lock()
+		if n := len(s.infinite) - maxInfinite; n > 0 {
+			drop = slices.Clone(s.infinite[:n])
+		}
+		s.mu.Unlock()
+		if len(drop) > 0 {
+			if err := cn.client.RemoveUnits(ctx, drop); err != nil {
 				return err
 			}
-			s.infinite = slices.Delete(s.infinite, 0, n)
+			s.mu.Lock()
+			s.infinite = slices.DeleteFunc(s.infinite, func(id uint64) bool { return slices.Contains(drop, id) })
+			s.mu.Unlock()
 		}
 	}
 	if backup {
-		s.blLayer, s.blBackup, s.blOn = l.Clone(), bk, true
-		s.publishStatusLocked()
+		return s.commit(cn, func() {
+			s.blLayer, s.blBackup, s.blOn = l.Clone(), bk, true
+			s.publishStatusLocked()
+		})
 	}
 	return nil
 }
 
-func (s *Session) scheduleLocked(ctx context.Context, c *emu.Client, units []*emulatorv1.Unit) error {
+func (s *Session) schedule(ctx context.Context, cn *conn, units []*emulatorv1.Unit) error {
 	if len(units) == 0 {
 		return nil
 	}
-	if err := c.ApplyUnits(ctx, units); err != nil {
+	if err := cn.client.ApplyUnits(ctx, units); err != nil {
 		return err
 	}
-	for _, u := range units {
-		if u.GetLifetime() == 0 {
-			s.infinite = append(s.infinite, u.GetId())
+	return s.commit(cn, func() {
+		for _, u := range units {
+			if u.GetLifetime() == 0 {
+				s.infinite = append(s.infinite, u.GetId())
+			}
 		}
-	}
-	return nil
+	})
 }
 
-func (s *Session) clearUnitsLocked(ctx context.Context, c *emu.Client) error {
-	if err := c.ClearUnits(ctx); err != nil {
+func (s *Session) clearUnits(ctx context.Context, cn *conn) error {
+	if err := cn.client.ClearUnits(ctx); err != nil {
 		return err
 	}
-	s.infinite = nil
-	return nil
+	return s.commit(cn, func() { s.infinite = nil })
 }
 
 // ApplyLayer schedules a layer on the running game. Units must target
 // existing domains and fit in them.
 func (s *Session) ApplyLayer(ctx context.Context, l *corrupt.Layer, backup bool) error {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.romLocked(); err != nil {
-		return err
-	}
-	if err := l.Validate(); err != nil {
-		return errorf(KindInvalid, "layer: %v", err)
-	}
-	if err := s.syncDomainsLocked(ctx); err != nil {
-		return err
-	}
-	if err := s.checkTargetsLocked(l); err != nil {
-		return err
-	}
-	return s.applyLocked(ctx, l, backup, false)
+	return s.withOp(ctx, "applyLayer", func(ctx context.Context) error {
+		cn, err := s.currentROM()
+		if err != nil {
+			return err
+		}
+		if err := l.Validate(); err != nil {
+			return errorf(KindInvalid, "layer: %v", err)
+		}
+		if err := s.syncDomains(ctx, cn); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		err = s.checkTargetsLocked(l)
+		s.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		return s.apply(ctx, cn, l, backup, false)
+	})
 }
 
 func (s *Session) checkTargetsLocked(l *corrupt.Layer) error {
@@ -222,13 +253,11 @@ type StoreSource struct {
 func (s *Session) Units(ctx context.Context) ([]EmuUnit, error) {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
-	s.mu.Lock()
-	c, err := s.clientLocked()
-	s.mu.Unlock()
+	cn, err := s.currentResponsive()
 	if err != nil {
 		return nil, err
 	}
-	us, err := c.ListUnits(ctx)
+	us, err := cn.client.ListUnits(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -249,68 +278,77 @@ func (s *Session) Units(ctx context.Context) ([]EmuUnit, error) {
 }
 
 func (s *Session) ClearUnits(ctx context.Context) error {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, err := s.clientLocked()
-	if err != nil {
-		return err
-	}
-	return s.clearUnitsLocked(ctx, c)
+	return s.withOp(ctx, "clearUnits", func(ctx context.Context) error {
+		cn, err := s.current()
+		if err != nil {
+			return err
+		}
+		return s.clearUnits(ctx, cn)
+	})
 }
 
 // Toggle switches the last layer applied with backup off (clear units,
 // apply the uncorrupt backup) or on (clear units, re-apply the layer).
 func (s *Session) Toggle(ctx context.Context, on bool) error {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, err := s.clientLocked()
-	if err != nil {
-		return err
-	}
-	if s.blLayer == nil {
-		return errorf(KindNoBackup, "no layer was applied with backup")
-	}
-	if err := s.clearUnitsLocked(ctx, c); err != nil {
-		return err
-	}
-	l := s.blBackup
-	if on {
-		l = s.blLayer
-	}
-	if err := s.applyLocked(ctx, l, false, false); err != nil {
-		return err
-	}
-	s.blOn = on
-	s.publishStatusLocked()
-	return nil
+	return s.withOp(ctx, "toggle", func(ctx context.Context) error {
+		cn, err := s.current()
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		l := s.blBackup
+		if on {
+			l = s.blLayer
+		}
+		noLayer := s.blLayer == nil
+		s.mu.Unlock()
+		if noLayer {
+			return errorf(KindNoBackup, "no layer was applied with backup")
+		}
+		if err := s.clearUnits(ctx, cn); err != nil {
+			return err
+		}
+		if err := s.apply(ctx, cn, l, false, false); err != nil {
+			return err
+		}
+		return s.commit(cn, func() {
+			s.blOn = on
+			s.publishStatusLocked()
+		})
+	})
 }
 
 // Reroll returns a rerolled copy of l following the reroll settings.
-func (s *Session) Reroll(l *corrupt.Layer) (*corrupt.Layer, error) {
-	ctx, cancel := s.opCtx(context.Background())
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.rerollLocked(ctx, l)
+func (s *Session) Reroll(ctx context.Context, l *corrupt.Layer) (*corrupt.Layer, error) {
+	var out *corrupt.Layer
+	err := s.withOp(ctx, "reroll", func(ctx context.Context) (err error) {
+		out, err = s.reroll(ctx, l)
+		return err
+	})
+	return out, err
 }
 
-func (s *Session) rerollLocked(ctx context.Context, l *corrupt.Layer) (*corrupt.Layer, error) {
+func (s *Session) reroll(ctx context.Context, l *corrupt.Layer) (*corrupt.Layer, error) {
 	if err := l.Validate(); err != nil {
 		return nil, errorf(KindInvalid, "layer: %v", err)
 	}
-	if err := s.syncDomainsLocked(ctx); err != nil {
-		return nil, err
+	s.mu.Lock()
+	cn := s.conn
+	s.mu.Unlock()
+	if cn != nil {
+		if err := s.syncDomains(ctx, cn); err != nil {
+			return nil, err
+		}
 	}
-	out := l.Clone()
+	s.mu.Lock()
+	st, selected, reg, pd := s.settings.Clone(), slices.Clone(s.selected), s.lists, s.protoDomains
 	var c *emu.Client
 	if s.conn != nil {
 		c = s.conn.client
 	}
-	if err := out.Reroll(s.rng, s.settings, s.selected, s.memLocked(c), s.lists); err != nil {
+	s.mu.Unlock()
+	out := l.Clone()
+	if err := out.Reroll(s.rng, st, selected, corrupt.EmuMemory(c, pd), reg); err != nil {
 		return nil, invalid(fmt.Errorf("reroll: %w", err))
 	}
 	return out, nil

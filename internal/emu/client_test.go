@@ -362,6 +362,39 @@ func TestContextCancel(t *testing.T) {
 	}
 }
 
+func TestCallTimeout(t *testing.T) {
+	g := newGate()
+	s := startFake(t, fake.Options{Manual: true, Hook: g.hook})
+	var timeouts []*emu.TimeoutError
+	c := dial(t, s, emu.WithCallTimeouts(100*time.Millisecond, 0),
+		emu.WithTimeoutHandler(func(_ *emu.Client, e *emu.TimeoutError) { timeouts = append(timeouts, e) }))
+	defer close(g.release)
+
+	start := time.Now()
+	err := c.Ping(t.Context())
+	var te *emu.TimeoutError
+	if !errors.As(err, &te) || !errors.Is(err, emu.ErrTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Ping = %v, want a TimeoutError", err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Errorf("Ping took %s with a 100ms timeout", el)
+	}
+	if len(timeouts) != 1 || timeouts[0].Request != "Ping" || timeouts[0].After != 100*time.Millisecond {
+		t.Errorf("timeout handler calls = %+v", timeouts)
+	}
+
+	// A caller's own deadline is not a call timeout.
+	<-g.entered
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := c.Ping(ctx); errors.Is(err, emu.ErrTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Ping with a short ctx = %v", err)
+	}
+	if len(timeouts) != 1 {
+		t.Errorf("timeout handler called for a caller deadline")
+	}
+}
+
 func TestEventsDropFrames(t *testing.T) {
 	s := startFake(t, fake.Options{Manual: true})
 	c := dial(t, s, emu.WithEventBuffer(4))

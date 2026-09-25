@@ -254,7 +254,7 @@ func (a *api) RerollLayer(ctx context.Context, r gen.RerollLayerRequestObject) (
 	if err != nil {
 		return nil, err
 	}
-	out, err := a.s.sess.Reroll(l)
+	out, err := a.s.sess.Reroll(ctx, l)
 	return respond(out, err, func(v gen.Layer) gen.RerollLayerResponseObject { return gen.RerollLayer200JSONResponse(v) })
 }
 

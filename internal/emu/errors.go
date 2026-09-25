@@ -1,8 +1,10 @@
 package emu
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 )
@@ -55,4 +57,23 @@ func CodeOf(err error) (emulatorv1.Error_Code, bool) {
 
 func newError(e *emulatorv1.Error) *Error {
 	return &Error{Code: e.GetCode(), Message: e.GetMessage()}
+}
+
+// ErrTimeout matches a *TimeoutError with errors.Is.
+var ErrTimeout = errors.New("emu: call timed out")
+
+// TimeoutError is returned when a call's per-call timeout expired. The
+// emulator may still be working on the request; its response is dropped.
+// It also matches context.DeadlineExceeded.
+type TimeoutError struct {
+	Request string
+	After   time.Duration
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("emulator did not answer %s within %s", e.Request, e.After)
+}
+
+func (e *TimeoutError) Is(target error) bool {
+	return target == ErrTimeout || target == context.DeadlineExceeded
 }

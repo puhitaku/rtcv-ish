@@ -20,6 +20,7 @@ import (
 	"github.com/puhitaku/rtcv-ish/internal/emu/fake"
 	"github.com/puhitaku/rtcv-ish/internal/server"
 	"github.com/puhitaku/rtcv-ish/internal/server/gen"
+	"github.com/puhitaku/rtcv-ish/internal/session"
 )
 
 const (
@@ -50,6 +51,7 @@ type envOptions struct {
 	fake      fake.Options
 	emulators []server.EmulatorSpec
 	version   string
+	timeouts  session.Timeouts
 	opts      []server.Option
 }
 
@@ -92,6 +94,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 		Logger:    log,
 		Emulators: o.emulators,
 		Version:   o.version,
+		Timeouts:  o.timeouts,
 	}, o.opts...)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

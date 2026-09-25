@@ -101,9 +101,28 @@ that a plain `go build` works without generators installed.
   derived context and exits on cancellation. The HTTP server and the
   emulator connection are shut down gracefully.
 - `go-deadlock` replaces `sync.Mutex`/`sync.RWMutex` in the core packages.
-- `internal/session.Session` serializes all state changes with one mutex.
-  Long emulator calls (savestate transfer, ROM load) are made outside the
-  lock with the connection pinned.
+- `internal/session.Session` has two levels of locking. `s.mu` guards the
+  session state, is held only briefly and never across an emulator call.
+  An operation gate (a one-slot semaphore) serializes multi-step
+  operations that talk to the emulator (connect/launch, ROM control,
+  blast/apply/toggle/reroll, Glitch Harvester, game protection, savestate
+  slots): an operation pins the connection, reads what it needs under
+  `s.mu`, calls the emulator with only the gate held and writes results
+  back under `s.mu` if the connection is still current. API operations
+  wait at most 5 s for the gate (at most 4 waiters) and otherwise fail with
+  409 `BUSY`; `Status.busy` names the running operation. Background work
+  (auto-corrupt on frame events, game protection, status refresh) only
+  tries the gate and skips or retries later. Status, domains, settings and
+  the stash/stockpile never wait for the gate; memory, words, screenshots
+  and the unit list call the emulator without it.
+- Every emulator call has a per-call timeout (30 s for LoadRom, LoadState
+  and SaveState, 5 s otherwise, plus the frames for Step). A timeout fails
+  the call with 504 `EMULATOR_TIMEOUT` and marks the connection
+  unresponsive (`Status.unresponsive`): operations then fail with 503
+  `EMULATOR_UNRESPONSIVE` until a ping (every 2 s) succeeds. Disconnect,
+  quit and close never wait for a stuck call; they close the connection,
+  which fails pending calls, and a launched emulator that does not exit
+  within 3 s is killed.
 - Events (status, frame counter, blast log, stash changes) are fanned out
   to SSE subscribers through a small broker in `internal/session`.
 - Persistent data lives in a data directory (`--data-dir`, default `data`

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
@@ -35,6 +36,9 @@ type conn struct {
 	addr   string
 	info   EmulatorInfo
 	proc   *process
+	// Guarded by Session.mu.
+	unresponsive   bool
+	refreshPending bool
 }
 
 type process struct {
@@ -48,17 +52,6 @@ func (s *Session) clientLocked() (*emu.Client, error) {
 		return nil, errDisconnected
 	}
 	return s.conn.client, nil
-}
-
-func (s *Session) romLocked() (*emu.Client, error) {
-	c, err := s.clientLocked()
-	if err != nil {
-		return nil, err
-	}
-	if s.game.State == StateNoRom {
-		return nil, errorf(KindNoROM, "no ROM loaded")
-	}
-	return c, nil
 }
 
 // ---- Bundled emulators ----
@@ -84,56 +77,96 @@ func fileExists(p string) bool {
 
 // ---- Connection ----
 
-func (s *Session) Connect(ctx context.Context, addr string) (Status, error) {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
+func (s *Session) dial(ctx context.Context, addr string) (*emu.Client, error) {
+	return emu.Dial(ctx, addr, emu.WithLogger(s.log),
+		emu.WithCallTimeouts(s.tm.Call, s.tm.LongCall),
+		emu.WithTimeoutHandler(s.onCallTimeout))
+}
+
+func (s *Session) checkDisconnected() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {
-		return Status{}, errorf(KindAlreadyConnected, "already connected to %s", s.conn.addr)
+		return errorf(KindAlreadyConnected, "already connected to %s", s.conn.addr)
+	}
+	return nil
+}
+
+func (s *Session) Connect(ctx context.Context, addr string) (Status, error) {
+	ctx, cancel := s.opCtx(ctx)
+	defer cancel()
+	release, err := s.beginOp(ctx, "connect", false)
+	if err != nil {
+		return Status{}, err
+	}
+	defer release()
+	if err := s.checkDisconnected(); err != nil {
+		return Status{}, err
 	}
 	dctx, dcancel := context.WithTimeout(ctx, dialTimeout)
-	c, err := emu.Dial(dctx, addr, emu.WithLogger(s.log))
+	c, err := s.dial(dctx, addr)
 	dcancel()
 	if err != nil {
 		return Status{}, &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("connect to %s: %v", addr, err), Err: err}
 	}
-	if err := s.setupConnLocked(ctx, c, addr, nil); err != nil {
+	if err := s.setupConn(ctx, c, addr, nil); err != nil {
 		return Status{}, err
 	}
 	return s.Status(), nil
 }
 
-// setupConnLocked subscribes to frame events, reads the game status and
-// starts the event loop.
-func (s *Session) setupConnLocked(ctx context.Context, c *emu.Client, addr string, proc *process) error {
+// setupConn subscribes to frame events, reads the game status, installs
+// the connection and starts its event and ping loops. c is closed on
+// failure.
+func (s *Session) setupConn(ctx context.Context, c *emu.Client, addr string, proc *process) error {
+	fail := func(format string, err error) error {
+		c.Close()
+		return &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf(format, addr, err), Err: err}
+	}
 	if err := s.ctx.Err(); err != nil {
 		c.Close()
 		return &Error{Kind: KindConnectFailed, Msg: "session is closed", Err: err}
 	}
-	cn := &conn{client: c, addr: addr, info: infoFromHello(c.Info()), proc: proc}
 	if err := c.Subscribe(ctx, 1); err != nil {
+		return fail("subscribe to %s: %v", err)
+	}
+	st, err := c.Status(ctx)
+	if err != nil {
+		return fail("read status from %s: %v", err)
+	}
+	game := gameFromProto(st)
+	var ds []*emulatorv1.Domain
+	if game.State != StateNoRom {
+		if ds, err = c.ListDomains(ctx); err != nil {
+			return fail("read status from %s: %v", err)
+		}
+	}
+	cn := &conn{client: c, addr: addr, info: infoFromHello(c.Info()), proc: proc}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ctx.Err(); err != nil {
 		c.Close()
-		return &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("subscribe to %s: %v", addr, err), Err: err}
+		return &Error{Kind: KindConnectFailed, Msg: "session is closed", Err: err}
+	}
+	if s.conn != nil {
+		c.Close()
+		return errorf(KindAlreadyConnected, "already connected to %s", s.conn.addr)
 	}
 	s.conn = cn
 	s.nextUnitID = 0
-	s.game = GameStatus{State: StateNoRom}
 	s.resetGameStateLocked()
-	if _, err := s.refreshGameLocked(ctx, true); err != nil {
-		s.dropConnLocked()
-		s.publishStatusLocked()
-		return &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("read status from %s: %v", addr, err), Err: err}
-	}
-	s.wg.Add(1)
+	s.reloadGameLocked(game, ds)
+	s.wg.Add(2)
 	go s.eventLoop(cn)
+	go s.pingLoop(cn)
 	s.log.Info("connected to emulator", "addr", addr, "emulator", cn.info.Name, "version", cn.info.Version, "system", cn.info.System)
 	s.notify("info", fmt.Sprintf("Connected to %s at %s", cn.info.Name, addr))
 	s.publishStatusLocked()
 	return nil
 }
 
-// dropConnLocked closes the connection and forgets the game.
+// dropConnLocked closes the connection, which fails its pending calls,
+// and forgets the game.
 func (s *Session) dropConnLocked() {
 	if s.conn == nil {
 		return
@@ -152,6 +185,8 @@ func (s *Session) resetGameStateLocked() {
 	s.store.ClearBackups()
 }
 
+// Disconnect drops the connection without waiting for running operations;
+// their emulator calls fail.
 func (s *Session) Disconnect() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,10 +201,13 @@ func (s *Session) Disconnect() Status {
 func (s *Session) Launch(ctx context.Context, name, rom string) (Status, error) {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn != nil {
-		return Status{}, errorf(KindAlreadyConnected, "already connected to %s", s.conn.addr)
+	release, err := s.beginOp(ctx, "launch", false)
+	if err != nil {
+		return Status{}, err
+	}
+	defer release()
+	if err := s.checkDisconnected(); err != nil {
+		return Status{}, err
 	}
 	i := slices.IndexFunc(s.cfg.Emulators, func(e EmulatorSpec) bool { return e.Name == name })
 	if i < 0 {
@@ -188,18 +226,18 @@ func (s *Session) Launch(ctx context.Context, name, rom string) (Status, error) 
 	if err != nil {
 		return Status{}, &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("start %s: %v", name, err), Err: err}
 	}
-	c, err := dialRetry(ctx, addr, proc, s.log)
+	c, err := s.dialRetry(ctx, addr, proc)
 	if err != nil {
 		s.kill(proc)
 		return Status{}, &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("connect to %s at %s: %v", name, addr, err), Err: err}
 	}
-	if err := s.setupConnLocked(ctx, c, addr, proc); err != nil {
+	if err := s.setupConn(ctx, c, addr, proc); err != nil {
 		s.kill(proc)
 		return Status{}, err
 	}
 	if rom != "" {
-		if _, err := s.loadRomLocked(ctx, rom); err != nil {
-			return Status{}, err
+		if _, err := s.loadRom(ctx, rom); err != nil {
+			return Status{}, classify(err)
 		}
 	}
 	return s.Status(), nil
@@ -214,12 +252,12 @@ func freePort() (int, error) {
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
-func dialRetry(ctx context.Context, addr string, proc *process, log *slog.Logger) (*emu.Client, error) {
+func (s *Session) dialRetry(ctx context.Context, addr string, proc *process) (*emu.Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
 	for {
 		dctx, dcancel := context.WithTimeout(ctx, dialTimeout)
-		c, err := emu.Dial(dctx, addr, emu.WithLogger(log))
+		c, err := s.dial(dctx, addr)
 		dcancel()
 		if err == nil {
 			return c, nil
@@ -234,9 +272,11 @@ func dialRetry(ctx context.Context, addr string, proc *process, log *slog.Logger
 	}
 }
 
-// startProcess must be called with s.mu held so that Close, which cancels
-// s.ctx before taking s.mu, never misses the process or its goroutine.
+// startProcess holds s.mu so that Close, which cancels s.ctx before taking
+// s.mu, never misses the process or its goroutine.
 func (s *Session) startProcess(spec EmulatorSpec, port int) (*process, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -270,10 +310,31 @@ func (s *Session) startProcess(spec EmulatorSpec, port int) (*process, error) {
 	return p, nil
 }
 
-// kill kills the process without waiting for it to exit, so it is safe
-// under s.mu. Its wait goroutine reaps it and Close waits for that.
+// kill kills the process without waiting for it to exit. Its wait
+// goroutine reaps it and Close waits for that.
 func (s *Session) kill(p *process) {
 	p.cmd.Process.Kill()
+}
+
+// stop asks a launched emulator to exit (SIGTERM, when term is set) and
+// kills it if it has not exited by deadline.
+func (s *Session) stop(p *process, deadline time.Time, term bool) {
+	if term {
+		p.cmd.Process.Signal(syscall.SIGTERM)
+	}
+	t := time.NewTimer(time.Until(deadline))
+	defer t.Stop()
+	select {
+	case <-p.exited:
+		return
+	case <-t.C:
+	}
+	s.log.Warn("killing emulator", "emulator", p.name, "pid", p.cmd.Process.Pid)
+	s.kill(p)
+	select {
+	case <-p.exited:
+	case <-time.After(time.Second):
+	}
 }
 
 // stopProcesses waits briefly for launched emulators to exit and kills
@@ -285,16 +346,9 @@ func (s *Session) stopProcesses() {
 		procs = append(procs, p)
 	}
 	s.procMu.Unlock()
-	deadline := time.After(stopTimeout)
+	deadline := time.Now().Add(s.tm.QuitGrace)
 	for _, p := range procs {
-		select {
-		case <-p.exited:
-			continue
-		case <-deadline:
-		}
-		s.log.Warn("killing emulator", "emulator", p.name, "pid", p.cmd.Process.Pid)
-		s.kill(p)
-		<-p.exited
+		s.stop(p, deadline, false)
 	}
 }
 
@@ -335,13 +389,28 @@ func (w *logWriter) emit(line []byte) {
 
 // ---- Event loop ----
 
+// refreshRetryInterval is how often a status refresh skipped because an
+// operation was running is retried.
+const refreshRetryInterval = 200 * time.Millisecond
+
+// eventLoop handles the connection's events. It never waits for the
+// operation gate: work that needs it is skipped or retried later.
 func (s *Session) eventLoop(cn *conn) {
 	defer s.wg.Done()
 	events := cn.client.Events()
+	retry := time.NewTicker(refreshRetryInterval)
+	defer retry.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
+		case <-retry.C:
+			s.mu.Lock()
+			pending := s.conn == cn && cn.refreshPending
+			s.mu.Unlock()
+			if pending {
+				s.onStatusEvent(cn)
+			}
 		case ev, ok := <-events:
 			if !ok {
 				s.onDisconnected(cn)
@@ -371,52 +440,89 @@ func (s *Session) onDisconnected(cn *conn) {
 }
 
 func (s *Session) onFrame(cn *conn, frame uint64) {
+	f := int64(frame)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.conn != cn || s.game.State == StateNoRom {
+		s.mu.Unlock()
 		return
 	}
-	if f := int64(frame); f > s.game.Frame {
+	if f > s.game.Frame {
 		s.game.Frame = f
 		s.storeStatusLocked()
 	}
 	if now := time.Now(); now.Sub(s.lastFrameEv) >= frameEventInterval {
 		s.lastFrameEv = now
-		s.broker.publish(Event{Type: EventFrame, Data: FrameEvent{Frame: int64(frame)}})
-	}
-	if !s.settings.AutoCorrupt {
-		return
+		s.broker.publish(Event{Type: EventFrame, Data: FrameEvent{Frame: f}})
 	}
 	// Frame events can be dropped, so count by the frame number. A frame
 	// before the marker means the counter went back (reset, savestate).
-	f := int64(frame)
-	if f < s.lastAutoFrame {
+	due := false
+	if s.settings.AutoCorrupt && !cn.unresponsive {
+		if f < s.lastAutoFrame {
+			s.lastAutoFrame = f
+		} else {
+			due = f-s.lastAutoFrame >= int64(s.settings.ErrorDelay)
+		}
+	}
+	s.mu.Unlock()
+	if !due {
+		return
+	}
+	// Skip this frame while an operation runs; the marker stays, so the
+	// next frame event tries again.
+	if !s.gate.tryAcquire("autoCorrupt") {
+		s.log.Debug("auto-corrupt skipped: an operation is running")
+		return
+	}
+	defer s.gate.release()
+	s.mu.Lock()
+	due = s.conn == cn && s.settings.AutoCorrupt && f >= s.lastAutoFrame
+	if due {
 		s.lastAutoFrame = f
+	}
+	s.mu.Unlock()
+	if !due {
 		return
 	}
-	if f-s.lastAutoFrame < int64(s.settings.ErrorDelay) {
-		return
-	}
-	s.lastAutoFrame = f
 	ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
 	defer cancel()
-	if _, err := s.blastLocked(ctx, true); err != nil && s.ctx.Err() == nil {
-		s.log.Error("auto-corrupt failed; disabling it", "err", err)
-		s.settings.AutoCorrupt = false
-		s.changed(EventSettings)
-		s.notify("error", fmt.Sprintf("Auto-corrupt disabled: %v", err))
+	if _, err := s.blast(ctx, true); err != nil && s.ctx.Err() == nil {
+		s.mu.Lock()
+		if s.settings.AutoCorrupt {
+			s.log.Error("auto-corrupt failed; disabling it", "err", err)
+			s.settings.AutoCorrupt = false
+			s.changed(EventSettings)
+			s.notify("error", fmt.Sprintf("Auto-corrupt disabled: %v", err))
+		}
+		s.mu.Unlock()
 	}
 }
 
+// onStatusEvent re-reads the game status. While an operation runs or the
+// emulator is unresponsive the refresh is marked pending and retried by
+// the event loop.
 func (s *Session) onStatusEvent(cn *conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.conn != cn {
+	if !s.gate.tryAcquire("refreshStatus") {
+		s.markRefreshPending(cn)
+		s.log.Debug("status refresh deferred: an operation is running")
 		return
 	}
+	defer s.gate.release()
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return
+	}
+	if cn.unresponsive {
+		cn.refreshPending = true
+		s.mu.Unlock()
+		return
+	}
+	cn.refreshPending = false
+	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
 	defer cancel()
-	reloaded, err := s.refreshGameLocked(ctx, false)
+	reloaded, err := s.refreshGame(ctx, cn, false)
 	if err != nil {
 		s.log.Warn("refresh game status", "err", err)
 		return
@@ -424,60 +530,107 @@ func (s *Session) onStatusEvent(cn *conn) {
 	// A status event also follows a console reset or re-creation, which
 	// can change domain sizes without changing the game.
 	if !reloaded {
-		if err := s.syncDomainsLocked(ctx); err != nil {
+		if err := s.syncDomains(ctx, cn); err != nil {
 			s.log.Warn("refresh domains", "err", err)
 		}
 	}
-	s.publishStatusLocked()
+	s.mu.Lock()
+	if s.conn == cn {
+		s.publishStatusLocked()
+	}
+	s.mu.Unlock()
 }
 
-// refreshGameLocked reads the game status. When the game changed (or
-// force is set) the domain list is re-read, the non-hidden domains are
-// selected and state tied to the old game is dropped; reloaded reports
-// that.
-func (s *Session) refreshGameLocked(ctx context.Context, force bool) (reloaded bool, err error) {
-	c, err := s.clientLocked()
+func (s *Session) markRefreshPending(cn *conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn == cn {
+		cn.refreshPending = true
+	}
+}
+
+// gameChangedLocked reports whether g is another game than the current.
+func (s *Session) gameChangedLocked(g GameStatus) bool {
+	return s.game.RomPath != g.RomPath || (s.game.State == StateNoRom) != (g.State == StateNoRom)
+}
+
+// reloadGameLocked installs a game and its domain list and selects the
+// non-hidden domains.
+func (s *Session) reloadGameLocked(g GameStatus, ds []*emulatorv1.Domain) {
+	s.game = g
+	s.lastAutoFrame = g.Frame
+	s.setDomainsLocked(ds)
+	s.autoSelectLocked()
+	if g.State != StateNoRom {
+		s.log.Info("game loaded", "rom", g.RomPath, "title", g.Title, "code", g.Code, "domains", len(ds))
+	}
+}
+
+// refreshGame reads the game status. When the game changed (or force is
+// set) the domain list is re-read, the non-hidden domains are selected and
+// state tied to the old game is dropped; reloaded reports that. The caller
+// holds the gate.
+func (s *Session) refreshGame(ctx context.Context, cn *conn, force bool) (reloaded bool, err error) {
+	st, err := cn.client.Status(ctx)
 	if err != nil {
 		return false, err
 	}
-	st, err := c.Status(ctx)
-	if err != nil {
-		return false, err
+	g := gameFromProto(st)
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return false, errDisconnected
 	}
-	old := s.game
-	s.game = gameFromProto(st)
-	if !force && old.RomPath == s.game.RomPath && (old.State == StateNoRom) == (s.game.State == StateNoRom) {
+	if !force && !s.gameChangedLocked(g) {
+		s.game = g
+		s.mu.Unlock()
 		return false, nil
+	}
+	s.mu.Unlock()
+	var ds []*emulatorv1.Domain
+	if g.State != StateNoRom {
+		ds, err = cn.client.ListDomains(ctx)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn != cn {
+		return true, errDisconnected
 	}
 	if !force {
 		s.resetGameStateLocked()
 	}
-	s.lastAutoFrame = s.game.Frame
-	var ds []*emulatorv1.Domain
-	if s.game.State != StateNoRom {
-		if ds, err = c.ListDomains(ctx); err != nil {
-			return true, err
-		}
+	if err != nil {
+		s.game = g
+		s.lastAutoFrame = g.Frame
+		return true, err
 	}
-	s.setDomainsLocked(ds)
-	s.autoSelectLocked()
-	if s.game.State != StateNoRom {
-		s.log.Info("game loaded", "rom", s.game.RomPath, "title", s.game.Title, "code", s.game.Code, "domains", len(ds))
-	}
+	s.reloadGameLocked(g, ds)
 	return true, nil
 }
 
-// syncDomainsLocked re-reads the domain list of the loaded game. Emulators
+// syncDomains re-reads the domain list of the loaded game. Emulators
 // resize domains when they re-create or reset the console (melonDS: DS vs
 // DSi MainRAM), so the list is refreshed before every generation instead
 // of only on a game change. The selection is kept by name.
-func (s *Session) syncDomainsLocked(ctx context.Context) error {
-	if s.conn == nil || s.game.State == StateNoRom {
+func (s *Session) syncDomains(ctx context.Context, cn *conn) error {
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return errDisconnected
+	}
+	if s.game.State == StateNoRom {
+		s.mu.Unlock()
 		return nil
 	}
-	ds, err := s.conn.client.ListDomains(ctx)
+	s.mu.Unlock()
+	ds, err := cn.client.ListDomains(ctx)
 	if err != nil {
 		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn != cn {
+		return errDisconnected
 	}
 	if slices.EqualFunc(s.protoDomains, ds, func(a, b *emulatorv1.Domain) bool {
 		return corrupt.DomainFromProto(a) == corrupt.DomainFromProto(b)
@@ -508,72 +661,84 @@ func (s *Session) setDomainsLocked(ds []*emulatorv1.Domain) {
 // ---- Game control ----
 
 func (s *Session) LoadRom(ctx context.Context, path string) (GameStatus, error) {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadRomLocked(ctx, path)
+	var g GameStatus
+	err := s.withOp(ctx, "loadRom", func(ctx context.Context) (err error) {
+		g, err = s.loadRom(ctx, path)
+		return err
+	})
+	return g, err
 }
 
-func (s *Session) loadRomLocked(ctx context.Context, path string) (GameStatus, error) {
-	c, err := s.clientLocked()
+func (s *Session) loadRom(ctx context.Context, path string) (GameStatus, error) {
+	cn, err := s.current()
 	if err != nil {
 		return GameStatus{}, err
 	}
 	if path == "" {
 		return GameStatus{}, errorf(KindInvalid, "path is empty")
 	}
-	if _, err := c.LoadRom(ctx, path); err != nil {
+	if _, err := cn.client.LoadRom(ctx, path); err != nil {
 		return GameStatus{}, err
 	}
-	if err := c.ClearUnits(ctx); err != nil {
+	if err := cn.client.ClearUnits(ctx); err != nil {
 		return GameStatus{}, err
 	}
-	s.resetGameStateLocked()
-	_, err = s.refreshGameLocked(ctx, true)
-	s.publishStatusLocked()
-	return s.game, err
+	if err := s.commit(cn, s.resetGameStateLocked); err != nil {
+		return GameStatus{}, err
+	}
+	_, err = s.refreshGame(ctx, cn, true)
+	return s.publishGame(), err
 }
 
-// control runs an emulator call and returns the refreshed game status.
-func (s *Session) control(ctx context.Context, call func(context.Context, *emu.Client) error) (GameStatus, error) {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
+// publishGame publishes the status and returns the game.
+func (s *Session) publishGame() GameStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.clientLocked()
-	if err != nil {
-		return GameStatus{}, err
-	}
-	if err := call(ctx, c); err != nil {
-		return GameStatus{}, err
-	}
-	_, err = s.refreshGameLocked(ctx, false)
 	s.publishStatusLocked()
-	return s.game, err
+	return s.game
+}
+
+// control runs an emulator call as an operation and returns the refreshed
+// game status.
+func (s *Session) control(ctx context.Context, name string, call func(context.Context, *conn) error) (GameStatus, error) {
+	var g GameStatus
+	err := s.withOp(ctx, name, func(ctx context.Context) error {
+		cn, err := s.current()
+		if err != nil {
+			return err
+		}
+		if err := call(ctx, cn); err != nil {
+			return err
+		}
+		_, err = s.refreshGame(ctx, cn, false)
+		g = s.publishGame()
+		return err
+	})
+	return g, err
 }
 
 func (s *Session) CloseRom(ctx context.Context) (GameStatus, error) {
-	return s.control(ctx, func(ctx context.Context, c *emu.Client) error { return c.CloseRom(ctx) })
+	return s.control(ctx, "closeRom", func(ctx context.Context, cn *conn) error { return cn.client.CloseRom(ctx) })
 }
 
 func (s *Session) Pause(ctx context.Context) (GameStatus, error) {
-	return s.control(ctx, func(ctx context.Context, c *emu.Client) error { return c.Pause(ctx) })
+	return s.control(ctx, "pause", func(ctx context.Context, cn *conn) error { return cn.client.Pause(ctx) })
 }
 
 func (s *Session) Resume(ctx context.Context) (GameStatus, error) {
-	return s.control(ctx, func(ctx context.Context, c *emu.Client) error { return c.Resume(ctx) })
+	return s.control(ctx, "resume", func(ctx context.Context, cn *conn) error { return cn.client.Resume(ctx) })
 }
 
 func (s *Session) Reset(ctx context.Context) (GameStatus, error) {
-	return s.control(ctx, func(ctx context.Context, c *emu.Client) error {
-		if err := c.Reset(ctx); err != nil {
+	return s.control(ctx, "reset", func(ctx context.Context, cn *conn) error {
+		if err := cn.client.Reset(ctx); err != nil {
 			return err
 		}
-		s.infinite = nil
-		// The frame counter restarts at 0.
-		s.lastAutoFrame = 0
-		return nil
+		return s.commit(cn, func() {
+			s.infinite = nil
+			// The frame counter restarts at 0.
+			s.lastAutoFrame = 0
+		})
 	})
 }
 
@@ -581,28 +746,49 @@ func (s *Session) Step(ctx context.Context, frames int) (GameStatus, error) {
 	if frames < 1 {
 		return GameStatus{}, errorf(KindInvalid, "frames must be at least 1")
 	}
-	return s.control(ctx, func(ctx context.Context, c *emu.Client) error {
-		_, err := c.Step(ctx, uint32(frames))
+	return s.control(ctx, "step", func(ctx context.Context, cn *conn) error {
+		_, err := cn.client.Step(ctx, uint32(frames))
 		return err
 	})
 }
 
-// Quit asks the emulator to exit and disconnects.
+// Quit asks the emulator to exit and disconnects. It does not wait for
+// running operations. A launched emulator that has not exited QuitGrace
+// after the request is killed.
 func (s *Session) Quit(ctx context.Context) error {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, err := s.clientLocked()
-	if err != nil {
+	cn := s.conn
+	if cn == nil {
+		s.mu.Unlock()
+		return errDisconnected
+	}
+	unresponsive := cn.unresponsive
+	s.mu.Unlock()
+	deadline := time.Now().Add(s.tm.QuitGrace)
+	var err error
+	if unresponsive {
+		err = errUnresponsive(cn.addr)
+	} else {
+		qctx, cancel := context.WithDeadline(ctx, deadline)
+		err = cn.client.Quit(qctx)
+		cancel()
+		if errors.Is(err, emu.ErrClosed) {
+			err = nil
+		}
+	}
+	if err != nil && cn.proc == nil {
 		return err
 	}
-	if err := c.Quit(ctx); err != nil && !errors.Is(err, emu.ErrClosed) {
-		return err
+	s.log.Info("emulator quit", "addr", cn.addr, "err", err)
+	s.mu.Lock()
+	if s.conn == cn {
+		s.dropConnLocked()
+		s.publishStatusLocked()
 	}
-	s.log.Info("emulator quit", "addr", s.conn.addr)
-	s.dropConnLocked()
-	s.publishStatusLocked()
+	s.mu.Unlock()
+	if cn.proc != nil {
+		s.stop(cn.proc, deadline, err != nil)
+	}
 	return nil
 }
 
@@ -610,13 +796,11 @@ func (s *Session) Quit(ctx context.Context) error {
 func (s *Session) Screenshot(ctx context.Context) ([]byte, error) {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
-	s.mu.Lock()
-	c, err := s.clientLocked()
-	s.mu.Unlock()
+	cn, err := s.currentResponsive()
 	if err != nil {
 		return nil, err
 	}
-	screens, err := c.Screenshot(ctx)
+	screens, err := cn.client.Screenshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -651,13 +835,11 @@ func (s *Session) Screenshot(ctx context.Context) ([]byte, error) {
 func (s *Session) ReadMemory(ctx context.Context, domain string, addr uint64, size int) ([]byte, error) {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
-	s.mu.Lock()
-	c, err := s.clientLocked()
-	s.mu.Unlock()
+	cn, err := s.currentResponsive()
 	if err != nil {
 		return nil, err
 	}
-	return c.ReadOne(ctx, domain, addr, uint32(size))
+	return cn.client.ReadOne(ctx, domain, addr, uint32(size))
 }
 
 // wordBatch is the largest single emulator read ReadWords issues.
@@ -667,8 +849,12 @@ const wordBatch = 1 << 20
 // little-endian 16-bit word, in memory order. A trailing odd byte is
 // ignored. The range is read in batches of at most wordBatch bytes.
 func (s *Session) ReadWords(ctx context.Context, domain string, addr uint64, size, stride int) ([]byte, error) {
+	cn, err := s.currentResponsive()
+	if err != nil {
+		return nil, err
+	}
+	c := cn.client
 	s.mu.Lock()
-	c, err := s.clientLocked()
 	var dsize uint64
 	found := false
 	for _, d := range s.domains {
@@ -677,9 +863,6 @@ func (s *Session) ReadWords(ctx context.Context, domain string, addr uint64, siz
 		}
 	}
 	s.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
 	if !found {
 		return nil, errorf(KindNotFound, "unknown domain %q", domain)
 	}
@@ -718,13 +901,11 @@ func (s *Session) readBatch(ctx context.Context, c *emu.Client, domain string, a
 func (s *Session) WriteMemory(ctx context.Context, domain string, addr uint64, data []byte) error {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
-	s.mu.Lock()
-	c, err := s.clientLocked()
-	s.mu.Unlock()
+	cn, err := s.currentResponsive()
 	if err != nil {
 		return err
 	}
-	return c.WriteOne(ctx, domain, addr, data)
+	return cn.client.WriteOne(ctx, domain, addr, data)
 }
 
 // ---- Domains ----

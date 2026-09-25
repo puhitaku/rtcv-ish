@@ -1,7 +1,16 @@
 // Package session is the rtcv-ish coordinator. A Session owns the
 // settings, the emulator connection, the domain selection, the seeded RNG,
-// the list registry, the Glitch Harvester store and the event broker, and
-// serializes every state change with one mutex.
+// the list registry, the Glitch Harvester store and the event broker.
+//
+// Two levels of locking keep a slow or hung emulator from blocking the
+// core. s.mu guards the session state and is only held briefly; no
+// emulator call is ever made with it held. Operations that talk to the
+// emulator in several steps are serialized by an operation gate (see
+// op.go): an operation reads what it needs under s.mu, calls the emulator
+// with only the gate held, and writes the results back under s.mu if the
+// connection it started on is still current. Every emulator call has a
+// per-call timeout; a call that times out marks the connection
+// unresponsive until a ping succeeds again.
 package session
 
 import (
@@ -28,6 +37,38 @@ import (
 // opTimeout bounds one API operation's emulator calls.
 const opTimeout = 60 * time.Second
 
+// Timeouts tunes how long the session waits for the emulator and for
+// other operations. Zero fields use the defaults.
+type Timeouts struct {
+	// Call and LongCall are the per-call emulator timeouts (emu defaults:
+	// 5 s, and 30 s for LoadRom, LoadState and SaveState).
+	Call, LongCall time.Duration
+	// OpWait is how long an operation waits for a running one before it
+	// fails with KindBusy. Default 5 s.
+	OpWait time.Duration
+	// PingInterval and Ping control how an unresponsive emulator is probed.
+	// Default 2 s each.
+	PingInterval, Ping time.Duration
+	// QuitGrace is how long Quit and Close wait for a launched emulator to
+	// exit before killing it. Default 3 s.
+	QuitGrace time.Duration
+}
+
+func (t Timeouts) withDefaults() Timeouts {
+	def := func(d *time.Duration, v time.Duration) {
+		if *d <= 0 {
+			*d = v
+		}
+	}
+	def(&t.Call, emu.DefaultCallTimeout)
+	def(&t.LongCall, emu.DefaultLongCallTimeout)
+	def(&t.OpWait, 5*time.Second)
+	def(&t.PingInterval, 2*time.Second)
+	def(&t.Ping, 2*time.Second)
+	def(&t.QuitGrace, 3*time.Second)
+	return t
+}
+
 // EmulatorSpec is a bundled emulator the core can launch.
 type EmulatorSpec struct {
 	Name string
@@ -43,10 +84,12 @@ type Config struct {
 	Logger    *slog.Logger
 	Emulators []EmulatorSpec
 	Version   string
+	Timeouts  Timeouts
 }
 
 type Session struct {
 	cfg    Config
+	tm     Timeouts
 	log    *slog.Logger
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -54,12 +97,16 @@ type Session struct {
 	once   sync.Once
 	broker *broker
 	status atomic.Pointer[Status]
+	gate   *opGate
 
 	procMu deadlock.Mutex
 	procs  map[*process]struct{}
 
+	// rng and nextUnitID are only used by operations holding the gate.
+	rng        *rand.Rand
+	nextUnitID uint64
+
 	mu           deadlock.Mutex
-	rng          *rand.Rand
 	settings     *corrupt.Settings
 	lists        *lists.Registry
 	store        *stockpile.Store
@@ -68,7 +115,6 @@ type Session struct {
 	protoDomains []*emulatorv1.Domain
 	domains      []corrupt.Domain
 	selected     []string
-	nextUnitID   uint64
 	infinite     []uint64
 	blLayer      *corrupt.Layer
 	blBackup     *corrupt.Layer
@@ -100,10 +146,12 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
 		cfg:    cfg,
+		tm:     cfg.Timeouts.withDefaults(),
 		log:    cfg.Logger,
 		ctx:    ctx,
 		cancel: cancel,
 		broker: newBroker(),
+		gate:   newOpGate(),
 		procs:  make(map[*process]struct{}),
 		rng:    rand.New(rand.NewPCG(uint64(cfg.Seed), 0)),
 		store:  store,
@@ -111,26 +159,31 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	}
 	s.settings = s.loadSettings()
 	s.reloadListsLocked()
+	s.mu.Lock()
 	s.publishStatusLocked()
+	s.mu.Unlock()
 	s.wg.Add(1)
 	go s.protectionLoop()
 	return s, nil
 }
 
 // Close drops the emulator connection, stops launched emulators and waits
-// for background work.
+// for background work. It does not wait for running operations: their
+// calls fail once the connection is closed.
 func (s *Session) Close() error {
 	s.once.Do(func() {
 		s.cancel()
 		s.mu.Lock()
-		if s.conn != nil {
-			if s.conn.proc != nil {
-				qctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				s.conn.client.Quit(qctx)
-				cancel()
-			}
-			s.dropConnLocked()
+		cn := s.conn
+		quit := cn != nil && cn.proc != nil && !cn.unresponsive
+		s.mu.Unlock()
+		if quit {
+			qctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			cn.client.Quit(qctx)
+			cancel()
 		}
+		s.mu.Lock()
+		s.dropConnLocked()
 		s.mu.Unlock()
 		s.stopProcesses()
 		s.broker.close()
@@ -163,6 +216,10 @@ const (
 	KindNoBackup
 	KindConnectFailed
 	KindDisconnected
+	// KindBusy: another operation is running and did not finish in time.
+	KindBusy
+	// KindUnresponsive: the emulator stopped answering calls.
+	KindUnresponsive
 )
 
 // Error is a session error the API maps to a status and code.
@@ -220,14 +277,23 @@ const (
 )
 
 type Status struct {
-	Version           string          `json:"version"`
-	DataDir           string          `json:"dataDir"`
-	Connected         bool            `json:"connected"`
-	Address           string          `json:"address"`
-	Emulator          *EmulatorInfo   `json:"emulator,omitempty"`
-	Game              *GameStatus     `json:"game,omitempty"`
+	Version   string        `json:"version"`
+	DataDir   string        `json:"dataDir"`
+	Connected bool          `json:"connected"`
+	Address   string        `json:"address"`
+	Emulator  *EmulatorInfo `json:"emulator,omitempty"`
+	Game      *GameStatus   `json:"game,omitempty"`
+	// Unresponsive is set while the connected emulator does not answer.
+	Unresponsive      bool            `json:"unresponsive"`
 	ProtectionBackups int             `json:"protectionBackups"`
 	BlastLayer        BlastLayerState `json:"blastLayer"`
+	// Busy is the running operation, if any.
+	Busy *BusyStatus `json:"busy,omitempty"`
+}
+
+type BusyStatus struct {
+	Operation string `json:"operation"`
+	SinceMs   int64  `json:"sinceMs"`
 }
 
 type BlastLayerState struct {
@@ -299,7 +365,11 @@ func infoFromHello(h *emulatorv1.HelloResponse) EmulatorInfo {
 
 // Status returns the current status without waiting for running
 // operations.
-func (s *Session) Status() Status { return *s.status.Load() }
+func (s *Session) Status() Status {
+	st := *s.status.Load()
+	st.Busy = s.gate.status()
+	return st
+}
 
 func (s *Session) statusLocked() *Status {
 	st := &Status{
@@ -312,6 +382,7 @@ func (s *Session) statusLocked() *Status {
 		info := s.conn.info
 		game := s.game
 		st.Connected = true
+		st.Unresponsive = s.conn.unresponsive
 		st.Address = s.conn.addr
 		st.Emulator = &info
 		st.Game = &game
@@ -325,5 +396,7 @@ func (s *Session) storeStatusLocked() { s.status.Store(s.statusLocked()) }
 func (s *Session) publishStatusLocked() {
 	st := s.statusLocked()
 	s.status.Store(st)
-	s.broker.publish(Event{Type: EventStatus, Data: st})
+	ev := *st
+	ev.Busy = s.gate.status()
+	s.broker.publish(Event{Type: EventStatus, Data: &ev})
 }

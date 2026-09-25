@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/puhitaku/rtcv-ish/internal/corrupt"
-	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/stockpile"
 )
 
@@ -46,67 +45,74 @@ func (s *Session) gameInfoLocked() stockpile.GameInfo {
 	return gi
 }
 
-// saveStateLocked saves the emulator state as a new savestate key.
-func (s *Session) saveStateLocked(ctx context.Context, c *emu.Client) (*stockpile.StashKey, error) {
-	data, err := c.SaveState(ctx)
+// saveState saves the emulator state as a new savestate key.
+func (s *Session) saveState(ctx context.Context, cn *conn) (*stockpile.StashKey, error) {
+	data, err := cn.client.SaveState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	key := s.store.NewKey(s.rng)
-	if err := s.store.WriteState(key, data); err != nil {
-		return nil, err
+	s.mu.Lock()
+	if s.conn != cn {
+		s.mu.Unlock()
+		return nil, errDisconnected
 	}
-	return &stockpile.StashKey{
+	key := s.store.NewKey(s.rng)
+	k := &stockpile.StashKey{
 		Key:             key,
 		ParentKey:       key,
 		Alias:           key,
 		Game:            s.gameInfoLocked(),
 		SelectedDomains: slices.Clone(s.selected),
 		CreatedAt:       time.Now().UTC(),
-	}, nil
+	}
+	s.mu.Unlock()
+	// Nothing references the new key yet, so the blob is written outside
+	// s.mu.
+	if err := s.store.WriteState(key, data); err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
-// loadStateLocked clears the scheduled units and loads a savestate blob.
-func (s *Session) loadStateLocked(ctx context.Context, c *emu.Client, parentKey string) error {
+// loadState clears the scheduled units and loads a savestate blob.
+func (s *Session) loadState(ctx context.Context, cn *conn, parentKey string) error {
 	data, err := s.store.ReadState(parentKey)
 	if err != nil {
 		return classify(err)
 	}
-	if err := s.clearUnitsLocked(ctx, c); err != nil {
+	if err := s.clearUnits(ctx, cn); err != nil {
 		return err
 	}
-	return c.LoadState(ctx, data)
+	return cn.client.LoadState(ctx, data)
 }
 
-// runLocked loads the key's state and applies its layer with backup.
-func (s *Session) runLocked(ctx context.Context, k *stockpile.StashKey) error {
-	c, err := s.clientLocked()
+// run loads the key's state and applies its layer with backup.
+func (s *Session) run(ctx context.Context, k *stockpile.StashKey) error {
+	cn, err := s.current()
 	if err != nil {
 		return err
 	}
-	if err := s.loadStateLocked(ctx, c, k.ParentKey); err != nil {
+	if err := s.loadState(ctx, cn, k.ParentKey); err != nil {
 		return err
 	}
 	if k.Layer == nil {
 		return nil
 	}
-	if err := s.syncDomainsLocked(ctx); err != nil {
+	if err := s.syncDomains(ctx, cn); err != nil {
 		return err
 	}
-	return s.applyLocked(ctx, k.Layer, true, false)
+	return s.apply(ctx, cn, k.Layer, true, false)
 }
 
 func (s *Session) newKeyLocked(parent *stockpile.StashKey, domains []string, l *corrupt.Layer) *stockpile.StashKey {
 	return stockpile.NewKey(s.store.NewKey(s.rng), parent, domains, l, time.Now())
 }
 
-// withOp runs f under the session lock with an operation context.
-func (s *Session) withOp(ctx context.Context, f func(context.Context) error) error {
-	ctx, cancel := s.opCtx(ctx)
-	defer cancel()
+// locked runs f under s.mu.
+func (s *Session) locked(f func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return classify(f(ctx))
+	return f()
 }
 
 // ---- Savestate slots ----
@@ -132,39 +138,47 @@ func (s *Session) slotInfoLocked(n int) (SlotInfo, error) {
 // SaveSlot saves the current state into a slot.
 func (s *Session) SaveSlot(ctx context.Context, n int) (SlotInfo, error) {
 	var si SlotInfo
-	err := s.withOp(ctx, func(ctx context.Context) error {
-		if _, err := s.store.Slot(n); err != nil {
+	err := s.withOp(ctx, "saveSlot", func(ctx context.Context) error {
+		if err := s.locked(func() error { _, err := s.store.Slot(n); return err }); err != nil {
 			return err
 		}
-		c, err := s.clientLocked()
+		cn, err := s.current()
 		if err != nil {
 			return err
 		}
-		k, err := s.saveStateLocked(ctx, c)
+		k, err := s.saveState(ctx, cn)
 		if err != nil {
 			return err
 		}
-		if err := s.store.SetSlot(n, k); err != nil {
+		return s.locked(func() error {
+			if err := s.store.SetSlot(n, k); err != nil {
+				return err
+			}
+			s.changed(EventSavestates)
+			si, err = s.slotInfoLocked(n)
 			return err
-		}
-		s.changed(EventSavestates)
-		si, err = s.slotInfoLocked(n)
-		return err
+		})
 	})
 	return si, err
 }
 
 func (s *Session) LoadSlot(ctx context.Context, n int) error {
-	return s.withOp(ctx, func(ctx context.Context) error {
-		k, err := s.store.SlotKey(n)
+	return s.withOp(ctx, "loadSlot", func(ctx context.Context) error {
+		var parent string
+		if err := s.locked(func() error {
+			k, err := s.store.SlotKey(n)
+			if err == nil {
+				parent = k.ParentKey
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+		cn, err := s.current()
 		if err != nil {
 			return err
 		}
-		c, err := s.clientLocked()
-		if err != nil {
-			return err
-		}
-		return s.loadStateLocked(ctx, c, k.ParentKey)
+		return s.loadState(ctx, cn, parent)
 	})
 }
 
@@ -200,46 +214,56 @@ func (s *Session) Stash() []*stockpile.StashKey {
 // loadBefore), applies it with backup and adds a new key to the stash.
 func (s *Session) Corrupt(ctx context.Context, slot int, loadBefore bool) (*stockpile.StashKey, error) {
 	var out *stockpile.StashKey
-	err := s.withOp(ctx, func(ctx context.Context) error {
+	err := s.withOp(ctx, "corrupt", func(ctx context.Context) error {
 		start := time.Now()
-		c, err := s.clientLocked()
+		cn, err := s.current()
 		if err != nil {
 			return err
 		}
-		sk, err := s.store.SlotKey(slot)
-		if err != nil {
+		var sk *stockpile.StashKey
+		if err := s.locked(func() error {
+			k, err := s.store.SlotKey(slot)
+			if err == nil {
+				sk = k.Clone()
+			}
+			return err
+		}); err != nil {
 			return err
 		}
-		if err := s.clearUnitsLocked(ctx, c); err != nil {
+		if err := s.clearUnits(ctx, cn); err != nil {
 			return err
 		}
 		if loadBefore {
-			if err := s.loadStateLocked(ctx, c, sk.ParentKey); err != nil {
+			if err := s.loadState(ctx, cn, sk.ParentKey); err != nil {
 				return err
 			}
 		}
-		l, err := s.generateLocked(ctx)
+		g, err := s.generate(ctx, cn)
 		if err != nil {
 			return err
 		}
-		if err := s.applyLocked(ctx, l, true, false); err != nil {
+		if err := s.apply(ctx, cn, g.layer, true, false); err != nil {
 			return err
 		}
-		k := s.newKeyLocked(sk, s.selected, l)
+		s.mu.Lock()
+		k := s.newKeyLocked(sk, g.selected, g.layer)
 		s.store.AddStash(k)
 		s.changed(EventStash)
-		s.publishBlast(l, start)
 		out = k.Clone()
+		s.mu.Unlock()
+		s.publishBlast(g.layer, g.settings.Engine, start)
 		return nil
 	})
 	return out, err
 }
 
-// addAndRunLocked adds a new key to the stash and runs it.
-func (s *Session) addAndRunLocked(ctx context.Context, k *stockpile.StashKey) (*stockpile.StashKey, error) {
-	if err := s.runLocked(ctx, k); err != nil {
+// addAndRun runs a new key and adds it to the stash.
+func (s *Session) addAndRun(ctx context.Context, k *stockpile.StashKey) (*stockpile.StashKey, error) {
+	if err := s.run(ctx, k); err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.store.AddStash(k)
 	s.changed(EventStash)
 	return k.Clone(), nil
@@ -249,16 +273,24 @@ func (s *Session) addAndRunLocked(ctx context.Context, k *stockpile.StashKey) (*
 // as a new stash key.
 func (s *Session) Inject(ctx context.Context, key string, slot int) (*stockpile.StashKey, error) {
 	var out *stockpile.StashKey
-	err := s.withOp(ctx, func(ctx context.Context) error {
-		src, err := s.store.Find(key)
-		if err != nil {
+	err := s.withOp(ctx, "inject", func(ctx context.Context) error {
+		var k *stockpile.StashKey
+		if err := s.locked(func() error {
+			src, err := s.store.Find(key)
+			if err != nil {
+				return err
+			}
+			sk, err := s.store.SlotKey(slot)
+			if err != nil {
+				return err
+			}
+			k = s.newKeyLocked(sk.Clone(), slices.Clone(src.SelectedDomains), layerOf(src))
+			return nil
+		}); err != nil {
 			return err
 		}
-		sk, err := s.store.SlotKey(slot)
-		if err != nil {
-			return err
-		}
-		out, err = s.addAndRunLocked(ctx, s.newKeyLocked(sk, src.SelectedDomains, layerOf(src)))
+		var err error
+		out, err = s.addAndRun(ctx, k)
 		return err
 	})
 	return out, err
@@ -272,27 +304,39 @@ func layerOf(k *stockpile.StashKey) *corrupt.Layer {
 }
 
 func (s *Session) Run(ctx context.Context, inStockpile bool, key string) error {
-	return s.withOp(ctx, func(ctx context.Context) error {
-		k, err := s.findLocked(inStockpile, key)
-		if err != nil {
+	return s.withOp(ctx, "run", func(ctx context.Context) error {
+		var k *stockpile.StashKey
+		if err := s.locked(func() error {
+			found, err := s.findLocked(inStockpile, key)
+			if err == nil {
+				k = found.Clone()
+			}
+			return err
+		}); err != nil {
 			return err
 		}
-		return s.runLocked(ctx, k)
+		return s.run(ctx, k)
 	})
 }
 
 // Original loads a stash key's state without its layer.
 func (s *Session) Original(ctx context.Context, key string) error {
-	return s.withOp(ctx, func(ctx context.Context) error {
-		k, err := s.store.FindStash(key)
+	return s.withOp(ctx, "original", func(ctx context.Context) error {
+		var parent string
+		if err := s.locked(func() error {
+			k, err := s.store.FindStash(key)
+			if err == nil {
+				parent = k.ParentKey
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+		cn, err := s.current()
 		if err != nil {
 			return err
 		}
-		c, err := s.clientLocked()
-		if err != nil {
-			return err
-		}
-		return s.loadStateLocked(ctx, c, k.ParentKey)
+		return s.loadState(ctx, cn, parent)
 	})
 }
 
@@ -300,19 +344,28 @@ func (s *Session) Original(ctx context.Context, key string) error {
 // and runs it.
 func (s *Session) RerollKey(ctx context.Context, key string) (*stockpile.StashKey, error) {
 	var out *stockpile.StashKey
-	err := s.withOp(ctx, func(ctx context.Context) error {
-		k, err := s.store.FindStash(key)
+	err := s.withOp(ctx, "rerollKey", func(ctx context.Context) error {
+		var k *stockpile.StashKey
+		if err := s.locked(func() error {
+			found, err := s.store.FindStash(key)
+			if err == nil {
+				k = found.Clone()
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+		if _, err := s.current(); err != nil {
+			return err
+		}
+		l, err := s.reroll(ctx, layerOf(k))
 		if err != nil {
 			return err
 		}
-		if _, err := s.clientLocked(); err != nil {
-			return err
-		}
-		l, err := s.rerollLocked(ctx, layerOf(k))
-		if err != nil {
-			return err
-		}
-		out, err = s.addAndRunLocked(ctx, s.newKeyLocked(k, k.SelectedDomains, l))
+		s.mu.Lock()
+		nk := s.newKeyLocked(k, k.SelectedDomains, l)
+		s.mu.Unlock()
+		out, err = s.addAndRun(ctx, nk)
 		return err
 	})
 	return out, err
@@ -322,25 +375,33 @@ func (s *Session) RerollKey(ctx context.Context, key string) (*stockpile.StashKe
 // first key's state, runs it and adds it to the stash.
 func (s *Session) Merge(ctx context.Context, keys []string) (*stockpile.StashKey, error) {
 	var out *stockpile.StashKey
-	err := s.withOp(ctx, func(ctx context.Context) error {
+	err := s.withOp(ctx, "merge", func(ctx context.Context) error {
 		if len(keys) < 2 {
 			return errorf(KindInvalid, "merge needs at least 2 keys")
 		}
-		var ks []*stockpile.StashKey
-		var layers []*corrupt.Layer
-		for _, key := range keys {
-			k, err := s.store.Find(key)
+		var k *stockpile.StashKey
+		if err := s.locked(func() error {
+			var ks []*stockpile.StashKey
+			var layers []*corrupt.Layer
+			for _, key := range keys {
+				k, err := s.store.Find(key)
+				if err != nil {
+					return err
+				}
+				ks = append(ks, k.Clone())
+				layers = append(layers, k.Layer)
+			}
+			l, err := distinct(corrupt.Merge(layers...))
 			if err != nil {
 				return err
 			}
-			ks = append(ks, k)
-			layers = append(layers, k.Layer)
-		}
-		l, err := distinct(corrupt.Merge(layers...))
-		if err != nil {
+			k = s.newKeyLocked(ks[0], slices.Clone(ks[0].SelectedDomains), l)
+			return nil
+		}); err != nil {
 			return err
 		}
-		out, err = s.addAndRunLocked(ctx, s.newKeyLocked(ks[0], ks[0].SelectedDomains, l))
+		var err error
+		out, err = s.addAndRun(ctx, k)
 		return err
 	})
 	return out, err
@@ -538,56 +599,65 @@ func (s *Session) LoadStockpile(path string) ([]*stockpile.StashKey, error) {
 // ---- Game protection ----
 
 func (s *Session) ProtectionBackup(ctx context.Context) error {
-	return s.withOp(ctx, s.backupLocked)
+	return s.withOp(ctx, "protectionBackup", s.backup)
 }
 
-func (s *Session) backupLocked(ctx context.Context) error {
-	c, err := s.clientLocked()
+func (s *Session) backup(ctx context.Context) error {
+	cn, err := s.current()
 	if err != nil {
 		return err
 	}
-	k, err := s.saveStateLocked(ctx, c)
+	k, err := s.saveState(ctx, cn)
 	if err != nil {
 		return err
 	}
-	s.store.PushBackup(k, s.settings.GameProtection.Keep)
-	s.lastBackup = time.Now()
-	s.publishStatusLocked()
-	return nil
+	return s.commit(cn, func() {
+		s.store.PushBackup(k, s.settings.GameProtection.Keep)
+		s.lastBackup = time.Now()
+		s.publishStatusLocked()
+	})
 }
 
 // ProtectionBack loads the most recent backup and drops it.
 func (s *Session) ProtectionBack(ctx context.Context) error {
-	return s.withOp(ctx, func(ctx context.Context) error { return s.loadLatestBackupLocked(ctx, true) })
+	return s.withOp(ctx, "protectionBack", func(ctx context.Context) error { return s.loadLatestBackup(ctx, true) })
 }
 
 // ProtectionLast loads the most recent backup and keeps it.
 func (s *Session) ProtectionLast(ctx context.Context) error {
-	return s.withOp(ctx, func(ctx context.Context) error { return s.loadLatestBackupLocked(ctx, false) })
+	return s.withOp(ctx, "protectionLast", func(ctx context.Context) error { return s.loadLatestBackup(ctx, false) })
 }
 
-func (s *Session) loadLatestBackupLocked(ctx context.Context, drop bool) error {
-	c, err := s.clientLocked()
+func (s *Session) loadLatestBackup(ctx context.Context, drop bool) error {
+	cn, err := s.current()
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	k := s.store.LatestBackup()
+	var parent string
+	if k != nil {
+		parent = k.ParentKey
+	}
+	s.mu.Unlock()
 	if k == nil {
 		return errorf(KindNoBackup, "no game protection backup")
 	}
-	if err := s.loadStateLocked(ctx, c, k.ParentKey); err != nil {
+	if err := s.loadState(ctx, cn, parent); err != nil {
 		return err
 	}
-	if drop {
-		s.store.DropLatestBackup()
-	}
-	s.lastBackup = time.Now()
-	s.publishStatusLocked()
-	return nil
+	return s.commit(cn, func() {
+		if drop && s.store.LatestBackup() == k {
+			s.store.DropLatestBackup()
+		}
+		s.lastBackup = time.Now()
+		s.publishStatusLocked()
+	})
 }
 
 // protectionLoop takes a backup every gameProtection.intervalSeconds while
-// game protection is enabled and a game is running.
+// game protection is enabled and a game is running. A tick is skipped
+// while an operation runs or the emulator is unresponsive.
 func (s *Session) protectionLoop() {
 	defer s.wg.Done()
 	t := time.NewTicker(time.Second)
@@ -600,16 +670,24 @@ func (s *Session) protectionLoop() {
 		}
 		s.mu.Lock()
 		gp := s.settings.GameProtection
-		due := gp.Enabled && s.conn != nil && s.game.State == StateRunning &&
+		due := gp.Enabled && s.conn != nil && !s.conn.unresponsive && s.game.State == StateRunning &&
 			time.Since(s.lastBackup) >= time.Duration(gp.IntervalSeconds)*time.Second
-		if due {
-			ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
-			if err := s.backupLocked(ctx); err != nil && s.ctx.Err() == nil {
-				s.log.Warn("game protection backup failed", "err", err)
-				s.lastBackup = time.Now()
-			}
-			cancel()
-		}
 		s.mu.Unlock()
+		if !due {
+			continue
+		}
+		if !s.gate.tryAcquire("protectionBackup") {
+			s.log.Debug("game protection backup skipped: an operation is running")
+			continue
+		}
+		ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
+		if err := s.backup(ctx); err != nil && s.ctx.Err() == nil {
+			s.log.Warn("game protection backup failed", "err", err)
+			s.mu.Lock()
+			s.lastBackup = time.Now()
+			s.mu.Unlock()
+		}
+		cancel()
+		s.gate.release()
 	}
 }

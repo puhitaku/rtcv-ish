@@ -16,13 +16,15 @@ info:
     | `PERMISSION_DENIED` | 403 | The core cannot read a host path. |
     | `NOT_FOUND` | 404 | Unknown domain, stash key, slot content, list, ROM path, bundled emulator. |
     | `NO_ROM` | 409 | The emulator has no ROM loaded. |
-    | `BUSY` | 409 | The emulator is busy. |
+    | `BUSY` | 409 | The emulator is busy, or another core operation is running and did not finish within 5 s (see `Status.busy`). |
     | `UNSUPPORTED` | 409 | The emulator lacks the capability. |
     | `ALREADY_CONNECTED` | 409 | Connect/launch while connected. |
     | `NO_BACKUP` | 409 | Toggle or protection "back" with nothing to restore. |
     | `CONNECT_FAILED` | 502 | Could not reach or handshake with the emulator. |
     | `FAILED` | 502 | The emulator reported a failure. |
     | `EMULATOR_DISCONNECTED` | 503 | The operation needs an emulator and none is connected. |
+    | `EMULATOR_UNRESPONSIVE` | 503 | The emulator stopped answering (`Status.unresponsive`); disconnect, quit or wait for it to recover. |
+    | `EMULATOR_TIMEOUT` | 504 | An emulator call timed out; the emulator is now marked unresponsive. |
     | `NOT_IMPLEMENTED` | 501 | Not implemented yet. |
     | `INTERNAL` | 500 | Anything else. |
 
@@ -1057,11 +1059,17 @@ components:
 
     Status:
       type: object
-      required: [version, dataDir, connected, address, protectionBackups, blastLayer]
+      required: [version, dataDir, connected, unresponsive, address, protectionBackups, blastLayer]
       properties:
         version: { type: string, description: Core version. }
         dataDir: { type: string }
         connected: { type: boolean }
+        unresponsive:
+          type: boolean
+          description: >-
+            The connected emulator did not answer a call in time. Operations
+            fail with `EMULATOR_UNRESPONSIVE` until a ping succeeds;
+            disconnect and quit still work.
         address: { type: string, description: Emulator API address; empty when disconnected. }
         emulator:
           $ref: "#/components/schemas/EmulatorInfo"
@@ -1071,6 +1079,16 @@ components:
           description: Present while connected (state `noRom` without a ROM).
         protectionBackups: { type: integer, description: Number of game protection backups held. }
         blastLayer: { $ref: "#/components/schemas/BlastLayerState" }
+        busy:
+          $ref: "#/components/schemas/BusyStatus"
+          description: The core operation currently running, if any.
+
+    BusyStatus:
+      type: object
+      required: [operation, sinceMs]
+      properties:
+        operation: { type: string, description: "Operation name, e.g. `loadRom`, `blast`, `protectionBackup`.", examples: [loadRom] }
+        sinceMs: { type: integer, format: int64, description: Milliseconds the operation has been running. }
 
     BlastLayerState:
       type: object
