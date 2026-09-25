@@ -41,6 +41,9 @@ func (s *Session) generateLocked(ctx context.Context) (*corrupt.Layer, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.syncDomainsLocked(ctx); err != nil {
+		return nil, err
+	}
 	if len(s.selected) == 0 {
 		return nil, errorf(KindInvalid, "no domains selected")
 	}
@@ -158,6 +161,9 @@ func (s *Session) ApplyLayer(ctx context.Context, l *corrupt.Layer, backup bool)
 	}
 	if err := l.Validate(); err != nil {
 		return errorf(KindInvalid, "layer: %v", err)
+	}
+	if err := s.syncDomainsLocked(ctx); err != nil {
+		return err
 	}
 	if err := s.checkTargetsLocked(l); err != nil {
 		return err
@@ -285,14 +291,19 @@ func (s *Session) Toggle(ctx context.Context, on bool) error {
 
 // Reroll returns a rerolled copy of l following the reroll settings.
 func (s *Session) Reroll(l *corrupt.Layer) (*corrupt.Layer, error) {
+	ctx, cancel := s.opCtx(context.Background())
+	defer cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rerollLocked(l)
+	return s.rerollLocked(ctx, l)
 }
 
-func (s *Session) rerollLocked(l *corrupt.Layer) (*corrupt.Layer, error) {
+func (s *Session) rerollLocked(ctx context.Context, l *corrupt.Layer) (*corrupt.Layer, error) {
 	if err := l.Validate(); err != nil {
 		return nil, errorf(KindInvalid, "layer: %v", err)
+	}
+	if err := s.syncDomainsLocked(ctx); err != nil {
+		return nil, err
 	}
 	out := l.Clone()
 	var c *emu.Client

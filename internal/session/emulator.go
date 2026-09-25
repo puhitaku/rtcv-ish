@@ -120,7 +120,7 @@ func (s *Session) setupConnLocked(ctx context.Context, c *emu.Client, addr strin
 	s.nextUnitID = 0
 	s.game = GameStatus{State: StateNoRom}
 	s.resetGameStateLocked()
-	if err := s.refreshGameLocked(ctx, true); err != nil {
+	if _, err := s.refreshGameLocked(ctx, true); err != nil {
 		s.dropConnLocked()
 		s.publishStatusLocked()
 		return &Error{Kind: KindConnectFailed, Msg: fmt.Sprintf("read status from %s: %v", addr, err), Err: err}
@@ -416,29 +416,38 @@ func (s *Session) onStatusEvent(cn *conn) {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
 	defer cancel()
-	if err := s.refreshGameLocked(ctx, false); err != nil {
+	reloaded, err := s.refreshGameLocked(ctx, false)
+	if err != nil {
 		s.log.Warn("refresh game status", "err", err)
 		return
+	}
+	// A status event also follows a console reset or re-creation, which
+	// can change domain sizes without changing the game.
+	if !reloaded {
+		if err := s.syncDomainsLocked(ctx); err != nil {
+			s.log.Warn("refresh domains", "err", err)
+		}
 	}
 	s.publishStatusLocked()
 }
 
 // refreshGameLocked reads the game status. When the game changed (or
 // force is set) the domain list is re-read, the non-hidden domains are
-// selected and state tied to the old game is dropped.
-func (s *Session) refreshGameLocked(ctx context.Context, force bool) error {
+// selected and state tied to the old game is dropped; reloaded reports
+// that.
+func (s *Session) refreshGameLocked(ctx context.Context, force bool) (reloaded bool, err error) {
 	c, err := s.clientLocked()
 	if err != nil {
-		return err
+		return false, err
 	}
 	st, err := c.Status(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	old := s.game
 	s.game = gameFromProto(st)
 	if !force && old.RomPath == s.game.RomPath && (old.State == StateNoRom) == (s.game.State == StateNoRom) {
-		return nil
+		return false, nil
 	}
 	if !force {
 		s.resetGameStateLocked()
@@ -447,7 +456,7 @@ func (s *Session) refreshGameLocked(ctx context.Context, force bool) error {
 	var ds []*emulatorv1.Domain
 	if s.game.State != StateNoRom {
 		if ds, err = c.ListDomains(ctx); err != nil {
-			return err
+			return true, err
 		}
 	}
 	s.setDomainsLocked(ds)
@@ -455,6 +464,32 @@ func (s *Session) refreshGameLocked(ctx context.Context, force bool) error {
 	if s.game.State != StateNoRom {
 		s.log.Info("game loaded", "rom", s.game.RomPath, "title", s.game.Title, "code", s.game.Code, "domains", len(ds))
 	}
+	return true, nil
+}
+
+// syncDomainsLocked re-reads the domain list of the loaded game. Emulators
+// resize domains when they re-create or reset the console (melonDS: DS vs
+// DSi MainRAM), so the list is refreshed before every generation instead
+// of only on a game change. The selection is kept by name.
+func (s *Session) syncDomainsLocked(ctx context.Context) error {
+	if s.conn == nil || s.game.State == StateNoRom {
+		return nil
+	}
+	ds, err := s.conn.client.ListDomains(ctx)
+	if err != nil {
+		return err
+	}
+	if slices.EqualFunc(s.protoDomains, ds, func(a, b *emulatorv1.Domain) bool {
+		return corrupt.DomainFromProto(a) == corrupt.DomainFromProto(b)
+	}) {
+		return nil
+	}
+	wasEmpty := len(s.domains) == 0
+	s.setDomainsLocked(ds)
+	if wasEmpty {
+		s.autoSelectLocked()
+	}
+	s.log.Info("domain list changed", "domains", s.domains)
 	return nil
 }
 
@@ -495,7 +530,7 @@ func (s *Session) loadRomLocked(ctx context.Context, path string) (GameStatus, e
 		return GameStatus{}, err
 	}
 	s.resetGameStateLocked()
-	err = s.refreshGameLocked(ctx, true)
+	_, err = s.refreshGameLocked(ctx, true)
 	s.publishStatusLocked()
 	return s.game, err
 }
@@ -513,7 +548,7 @@ func (s *Session) control(ctx context.Context, call func(context.Context, *emu.C
 	if err := call(ctx, c); err != nil {
 		return GameStatus{}, err
 	}
-	err = s.refreshGameLocked(ctx, false)
+	_, err = s.refreshGameLocked(ctx, false)
 	s.publishStatusLocked()
 	return s.game, err
 }

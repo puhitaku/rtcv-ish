@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,7 @@ func New(opts Options) (*Server, error) {
 	if opts.Domains == nil {
 		opts.Domains = DefaultDomains()
 	}
+	opts.Domains = slices.Clone(opts.Domains)
 	if opts.FrameRate <= 0 {
 		opts.FrameRate = 60
 	}
@@ -193,6 +195,30 @@ func (s *Server) Input() *emulatorv1.SetInputRequest {
 		return nil
 	}
 	return proto.Clone(s.input).(*emulatorv1.SetInputRequest)
+}
+
+// ResizeDomain changes a domain's size and resets the console, the way
+// an emulator re-creates its console when a setting changes: memory is
+// cleared, units are dropped, the frame counter restarts and a
+// StatusEvent is sent.
+func (s *Server) ResizeDomain(name string, size uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, _ := s.domain(name)
+	if d == nil {
+		return fmt.Errorf("unknown domain %q", name)
+	}
+	d.Size = size
+	if s.state != emulatorv1.Status_NO_ROM {
+		s.mem[name] = make([]byte, size)
+		for _, m := range s.mem {
+			clear(m)
+		}
+		s.frame = 0
+		s.units = nil
+	}
+	s.emitStatus()
+	return nil
 }
 
 // Memory returns a copy of a domain's contents, or nil.

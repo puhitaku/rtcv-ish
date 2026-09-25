@@ -90,6 +90,9 @@ func (s *Session) runLocked(ctx context.Context, k *stockpile.StashKey) error {
 	if k.Layer == nil {
 		return nil
 	}
+	if err := s.syncDomainsLocked(ctx); err != nil {
+		return err
+	}
 	return s.applyLocked(ctx, k.Layer, true, false)
 }
 
@@ -305,7 +308,7 @@ func (s *Session) RerollKey(ctx context.Context, key string) (*stockpile.StashKe
 		if _, err := s.clientLocked(); err != nil {
 			return err
 		}
-		l, err := s.rerollLocked(layerOf(k))
+		l, err := s.rerollLocked(ctx, layerOf(k))
 		if err != nil {
 			return err
 		}
