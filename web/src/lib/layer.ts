@@ -170,13 +170,23 @@ export function writtenValue(u: Unit): Uint8Array {
   return b
 }
 
+/** Most units breakDown may produce, so a huge unit cannot freeze the page. */
+export const MAX_BREAKDOWN_UNITS = 65536
+
 /**
  * Splits units into 1-byte units. VALUE units get the bytes they would
  * write; STORE units keep the tilt on their least significant byte only.
- * Only the units at `indices` are split (all units when empty).
+ * Only the units at `indices` are split (all units when empty). Throws
+ * when the result would exceed MAX_BREAKDOWN_UNITS.
  */
 export function breakDown(l: Layer, indices: number[] = []): Layer {
   const sel = new Set(indices.length ? indices : l.units.map((_, i) => i))
+  const count = l.units.reduce((n, u, i) => n + (sel.has(i) ? Math.max(u.precision, 1) : 1), 0)
+  if (count > MAX_BREAKDOWN_UNITS) {
+    throw new Error(
+      `Break down would create ${count} units; the limit is ${MAX_BREAKDOWN_UNITS}. Select fewer or smaller units.`,
+    )
+  }
   const units: Unit[] = []
   l.units.forEach((u, idx) => {
     if (!sel.has(idx) || u.precision <= 1) {

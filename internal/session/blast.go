@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -182,6 +183,20 @@ func (s *Session) schedule(ctx context.Context, cn *conn, units []*emulatorv1.Un
 		return nil
 	}
 	if err := cn.client.ApplyUnits(ctx, units); err != nil {
+		// Large layers go out in several batches; undo the ones that were
+		// scheduled so that applying stays all-or-nothing.
+		var ae *emu.ApplyError
+		if errors.As(err, &ae) {
+			ids := make([]uint64, ae.Applied)
+			for i, u := range units[:ae.Applied] {
+				ids[i] = u.GetId()
+			}
+			if rerr := cn.client.RemoveUnits(context.WithoutCancel(ctx), ids); rerr != nil {
+				s.log.Warn("could not remove partially applied units", "count", len(ids), "err", rerr)
+				s.unitsChanged(UnitsApply, 0)
+			}
+			return ae.Err
+		}
 		return err
 	}
 	return s.commit(cn, func() {

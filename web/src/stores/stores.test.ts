@@ -144,4 +144,52 @@ describe('editor store', () => {
     const put = calls.find((c) => c.method === 'PUT')!
     expect((put.body as { units: unknown[] }).units).toHaveLength(4)
   })
+
+  it('bakes a unit larger than one memory read in 64 KiB chunks', async () => {
+    const size = 0x10000 * 2 + 0x100
+    const byteAt = (a: number) => (a * 13) & 0xff
+    const { calls } = mockFetch({
+      'GET /api/memory/RAM': (c) => {
+        const address = Number(c.query.address)
+        const n = Number(c.query.size)
+        if (n > 0x10000) return errorResponse(400, 'INVALID_ARGUMENT', 'size in 1..65536')
+        let data = ''
+        for (let i = 0; i < n; i++)
+          data += byteAt(address + i)
+            .toString(16)
+            .padStart(2, '0')
+        return { domain: 'RAM', address, data }
+      },
+    })
+    const ed = useEditorStore()
+    ed.replace({ note: '', units: [{ ...newUnit('RAM', 0x40), source: 'store', precision: size }] })
+    await ed.bake()
+    const reads = calls.map((c) => [Number(c.query.address), Number(c.query.size)])
+    expect(reads).toEqual([
+      [0x40, 0x10000],
+      [0x40 + 0x10000, 0x10000],
+      [0x40 + 0x20000, 0x100],
+    ])
+    const u = ed.layer.units[0]!
+    expect(u).toMatchObject({ source: 'value', precision: size, address: 0x40 })
+    expect(u.value).toHaveLength(size * 2)
+    for (const off of [0, 0xffff, 0x10000, size - 1]) {
+      expect(u.value.slice(off * 2, off * 2 + 2)).toBe(
+        byteAt(0x40 + off)
+          .toString(16)
+          .padStart(2, '0'),
+      )
+    }
+  })
+
+  it('refuses to break down a huge unit', () => {
+    const ed = useEditorStore()
+    const l = {
+      note: '',
+      units: [{ ...newUnit('RAM', 0), source: 'store' as const, precision: 16 << 20 }],
+    }
+    ed.replace(l)
+    expect(() => ed.breakDown()).toThrow(/limit/)
+    expect(ed.layer.units).toHaveLength(1)
+  })
 })

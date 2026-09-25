@@ -159,6 +159,20 @@ describe('sanitizeDuplicates', () => {
   })
 })
 
+describe('breakDown limit', () => {
+  it('refuses to create more than MAX_BREAKDOWN_UNITS units', () => {
+    const huge = layer([unit({ source: 'store', value: '', precision: 16 << 20 })])
+    expect(() => L.breakDown(huge)).toThrow(/limit is 65536/)
+    const edge = layer([
+      unit({ source: 'store', value: '', precision: L.MAX_BREAKDOWN_UNITS - 1 }),
+      unit({ address: 1 }),
+    ])
+    expect(L.breakDown(edge).units).toHaveLength(L.MAX_BREAKDOWN_UNITS)
+    // Units outside the selection count as one each.
+    expect(L.breakDown(layer([unit(), ...huge.units]), [0]).units).toHaveLength(2)
+  })
+})
+
 describe('bake', () => {
   it('replaces enabled selected units with VALUE units holding memory', async () => {
     const l = layer([

@@ -221,6 +221,48 @@ describe('MemoryPanel bitmaps', () => {
   })
 })
 
+describe('MemoryPanel auto refresh persistence', () => {
+  it('remembers the auto checkbox across mounts and resumes refreshing', async () => {
+    vi.useFakeTimers()
+    const { calls } = mockFetch({
+      'GET /api/memory/RAM/words': wordsResponse,
+      'GET /api/memory/RAM': (c) => ({
+        domain: 'RAM',
+        address: 0,
+        data: '00'.repeat(Number(c.query.size)),
+      }),
+    })
+    useDomainsStore().domains = [ram]
+    const count = () => calls.filter((c) => c.path === '/api/memory/RAM').length
+
+    const first = mount(MemoryPanel)
+    await flushPromises()
+    await first.find(tid('mem-auto')).setValue(true)
+    expect(localStorage.getItem('rtcvish.memory.autoRefresh')).toBe('true')
+    first.unmount()
+
+    const second = mount(MemoryPanel)
+    await flushPromises()
+    expect((second.find(tid('mem-auto')).element as HTMLInputElement).checked).toBe(true)
+    const before = count()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(count()).toBe(before + 1)
+
+    await second.find(tid('mem-auto')).setValue(false)
+    expect(localStorage.getItem('rtcvish.memory.autoRefresh')).toBe('false')
+    second.unmount()
+
+    const third = mount(MemoryPanel)
+    await flushPromises()
+    expect((third.find(tid('mem-auto')).element as HTMLInputElement).checked).toBe(false)
+    const after = count()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(count()).toBe(after)
+    third.unmount()
+    vi.useRealTimers()
+  })
+})
+
 describe('MemoryPanel freezes', () => {
   it('shows frozen cells from server units and unfreezes one unit', async () => {
     let server = [

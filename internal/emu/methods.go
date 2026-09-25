@@ -54,13 +54,25 @@ func (c *Client) ReadOne(ctx context.Context, domain string, addr uint64, size u
 	return data[0], nil
 }
 
+// Write writes chunks in order. Requests larger than the batch budget are
+// split into several messages, so a failure can leave earlier chunks
+// written.
 func (c *Client) Write(ctx context.Context, chunks []*emulatorv1.WriteChunk) error {
-	resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_Write{Write: &emulatorv1.WriteRequest{Chunks: chunks}}})
-	if err != nil {
-		return err
+	budget := c.batchBudget()
+	var pieces []*emulatorv1.WriteChunk
+	for _, ch := range chunks {
+		pieces = append(pieces, splitChunk(ch, budget)...)
 	}
-	_, err = expect(resp, resp.GetWrite())
-	return err
+	for _, b := range batches(pieces, budget) {
+		resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_Write{Write: &emulatorv1.WriteRequest{Chunks: b}}})
+		if err != nil {
+			return err
+		}
+		if _, err := expect(resp, resp.GetWrite()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) WriteOne(ctx context.Context, domain string, addr uint64, data []byte) error {
@@ -141,13 +153,26 @@ func (c *Client) Step(ctx context.Context, n uint32) (uint64, error) {
 	return r.GetFrame(), err
 }
 
+// ApplyUnits schedules units in order. Requests larger than the batch
+// budget are split into several messages, each validated separately by
+// the emulator. When a later batch fails, the error is an *ApplyError
+// reporting how many leading units were already scheduled.
 func (c *Client) ApplyUnits(ctx context.Context, units []*emulatorv1.Unit) error {
-	resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_ApplyUnits{ApplyUnits: &emulatorv1.ApplyUnitsRequest{Units: units}}})
-	if err != nil {
-		return err
+	applied := 0
+	for _, b := range batches(units, c.batchBudget()) {
+		resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_ApplyUnits{ApplyUnits: &emulatorv1.ApplyUnitsRequest{Units: b}}})
+		if err == nil {
+			_, err = expect(resp, resp.GetApplyUnits())
+		}
+		if err != nil {
+			if applied > 0 {
+				return &ApplyError{Applied: applied, Err: err}
+			}
+			return err
+		}
+		applied += len(b)
 	}
-	_, err = expect(resp, resp.GetApplyUnits())
-	return err
+	return nil
 }
 
 func (c *Client) RemoveUnits(ctx context.Context, ids []uint64) error {

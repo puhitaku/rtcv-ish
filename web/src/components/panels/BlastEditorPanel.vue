@@ -354,7 +354,9 @@ function onKey(e: KeyboardEvent) {
       >
         Bake to VALUE
       </button>
-      <button class="btn" data-testid="be-breakdown" @click="ed.breakDown()">Break down</button>
+      <button class="btn" data-testid="be-breakdown" @click="act(async () => ed.breakDown())">
+        Break down
+      </button>
       <button class="btn" data-testid="be-sanitize" @click="ed.sanitize()">
         Sanitize duplicates
       </button>

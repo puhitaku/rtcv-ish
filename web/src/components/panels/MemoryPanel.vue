@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
 import MemoryBitmap from '@/components/memory/MemoryBitmap.vue'
 import { formatAddress, hex, hexRows, parseHex, wordToMemoryHex, type Group } from '@/lib/hex'
+import { loadString, save as saveLocal } from '@/lib/storage'
 import { useDomainsStore } from '@/stores/domains'
 import { act } from '@/stores/log'
 import { ROW, useMemoryStore } from '@/stores/memory'
@@ -12,6 +13,7 @@ import { useUnitsStore } from '@/stores/units'
 
 const VIEW = 256
 const AUTO_MS = 500
+const AUTO_KEY = 'rtcvish.memory.autoRefresh'
 const mem = useMemoryStore()
 const domains = useDomainsStore()
 const st = useStatusStore()
@@ -22,7 +24,7 @@ const group = ref<Group>(1)
 const addrText = ref(hex(mem.address))
 const cursor = ref<number | null>(null)
 const typed = ref('')
-const auto = ref(false)
+const auto = ref(loadString(AUTO_KEY, 'false') === 'true')
 const shot = ref(0)
 const shotError = ref(false)
 
@@ -186,10 +188,15 @@ async function refreshAll() {
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
-watch(auto, (on) => {
-  clearInterval(timer)
-  if (on) timer = setInterval(() => void refreshAll(), AUTO_MS)
-})
+watch(
+  auto,
+  (on) => {
+    saveLocal(AUTO_KEY, String(on))
+    clearInterval(timer)
+    if (on) timer = setInterval(() => void refreshAll(), AUTO_MS)
+  },
+  { immediate: true },
+)
 // Frozen cells follow the server's scheduled units, refetched on `units`
 // events and game changes while the panel is shown.
 const stopUnits = units.watch()

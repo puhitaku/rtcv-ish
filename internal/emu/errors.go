@@ -77,3 +77,14 @@ func (e *TimeoutError) Error() string {
 func (e *TimeoutError) Is(target error) bool {
 	return target == ErrTimeout || target == context.DeadlineExceeded
 }
+
+// ApplyError is returned by ApplyUnits when a batch failed after earlier
+// batches were scheduled: the first Applied units are live on the
+// emulator.
+type ApplyError struct {
+	Applied int
+	Err     error
+}
+
+func (e *ApplyError) Error() string { return e.Err.Error() }
+func (e *ApplyError) Unwrap() error { return e.Err }
