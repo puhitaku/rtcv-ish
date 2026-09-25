@@ -125,6 +125,8 @@ type Session struct {
 	lastAutoFrame int64
 	lastFrameEv   time.Time
 	lastBackup    time.Time
+	// lastBusy is the gate state of the last published status event.
+	lastBusy gateState
 }
 
 // New opens the data directory and starts background work. The session
@@ -162,8 +164,9 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	s.mu.Lock()
 	s.publishStatusLocked()
 	s.mu.Unlock()
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.protectionLoop()
+	go s.busyLoop()
 	return s, nil
 }
 
@@ -397,6 +400,7 @@ func (s *Session) publishStatusLocked() {
 	st := s.statusLocked()
 	s.status.Store(st)
 	ev := *st
-	ev.Busy = s.gate.status()
+	s.lastBusy = s.gate.state()
+	ev.Busy = s.lastBusy.busy()
 	s.broker.publish(Event{Type: EventStatus, Data: &ev})
 }

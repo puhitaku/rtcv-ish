@@ -7,7 +7,9 @@ import type { Status } from '@/api/types'
 import { errorResponse, mockFetch } from '@/test/fetch'
 import { statusFixture } from '@/test/fixtures'
 import { act, useLogStore } from './log'
-import { BUSY_POLL_MS, useBusyPoll, useStatusStore } from './status'
+import { BUSY_POLL_MS, BUSY_TICK_MS, useBusyPoll, useStatusStore } from './status'
+
+const BusyPoll = defineComponent({ setup: () => useBusyPoll(), template: '<div />' })
 
 beforeEach(() => setActivePinia(createPinia()))
 afterEach(() => {
@@ -68,7 +70,7 @@ describe('status store: busy / unresponsive', () => {
     expect(st.needEmu).toBe('Emulator not connected')
   })
 
-  it('polls /status while a call is pending and while busy', async () => {
+  it('ticks while a call is pending and polls only as a fallback while busy', async () => {
     vi.useFakeTimers()
     let busy: Status['busy'] = { operation: 'loadRom', sinceMs: 100 }
     let resolveRom!: (r: Response) => void
@@ -81,29 +83,56 @@ describe('status store: busy / unresponsive', () => {
     })
     const st = useStatusStore()
     st.set(statusFixture())
-    const w = mount(defineComponent({ setup: () => useBusyPoll(), template: '<div />' }))
+    const w = mount(BusyPoll)
     const polls = () => calls.filter((c) => c.path === '/api/status').length
 
     await vi.advanceTimersByTimeAsync(BUSY_POLL_MS * 2)
     expect(polls()).toBe(0)
 
+    // A pending call alone only ticks the clock; busy arrives over SSE.
     const p = st.loadRom('/r/game.nds')
-    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS)
-    expect(polls()).toBe(1)
-    expect(st.busy?.operation).toBe('loadRom')
+    await vi.advanceTimersByTimeAsync(BUSY_TICK_MS)
+    expect(st.now).toBe(Date.now())
+    expect(polls()).toBe(0)
+
+    // The `status` event reports busy: the elapsed time ticks locally.
+    st.set(statusFixture({ busy }))
+    expect(st.busyMs).toBe(100)
+    await vi.advanceTimersByTimeAsync(BUSY_TICK_MS * 2)
+    expect(st.busyMs).toBe(100 + BUSY_TICK_MS * 2)
+    expect(polls()).toBe(0)
 
     resolveRom(new Response(JSON.stringify(statusFixture().game), { status: 200 }))
     await p
-    // Still busy (e.g. another client's operation): keep polling.
-    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS)
-    expect(polls()).toBe(2)
+    // Still busy (e.g. a missed idle event): fall back to a slow poll.
+    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS - BUSY_TICK_MS * 2)
+    expect(polls()).toBe(1)
+    expect(st.busy?.operation).toBe('loadRom')
+    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS - BUSY_TICK_MS)
+    expect(polls()).toBe(1)
 
     busy = undefined
-    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS)
-    expect(polls()).toBe(3)
+    await vi.advanceTimersByTimeAsync(BUSY_TICK_MS)
+    expect(polls()).toBe(2)
     expect(st.busy).toBeNull()
+    expect(st.busyMs).toBe(0)
     await vi.advanceTimersByTimeAsync(BUSY_POLL_MS * 3)
-    expect(polls()).toBe(3)
+    expect(polls()).toBe(2)
+    w.unmount()
+  })
+
+  it('stops polling once a status event reports idle', async () => {
+    vi.useFakeTimers()
+    const { calls } = mockFetch({
+      'GET /api/status': () => statusFixture({ busy: { operation: 'loadRom', sinceMs: 0 } }),
+    })
+    const st = useStatusStore()
+    st.set(statusFixture({ busy: { operation: 'loadRom', sinceMs: 0 } }))
+    const w = mount(BusyPoll)
+    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS - BUSY_TICK_MS)
+    st.set(statusFixture())
+    await vi.advanceTimersByTimeAsync(BUSY_POLL_MS * 3)
+    expect(calls.filter((c) => c.path === '/api/status').length).toBe(0)
     w.unmount()
   })
 })

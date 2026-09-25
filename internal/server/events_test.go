@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/puhitaku/rtcv-ish/internal/server/gen"
+	"github.com/puhitaku/rtcv-ish/internal/session"
 )
 
 func TestEvents(t *testing.T) {
@@ -98,4 +99,30 @@ func TestEventsTwoSubscribers(t *testing.T) {
 	e.patchSettings(gen.SettingsPatch{Intensity: ptr(int64(2))})
 	a.waitFor(t, "settings", nil)
 	b.waitFor(t, "settings", nil)
+}
+
+// Acquiring and releasing the operation gate publishes status events, so
+// clients see busy change without polling.
+func TestEventsBusy(t *testing.T) {
+	e, h := hangEnv(t, session.Timeouts{})
+	events := e.openEvents()
+	events.waitFor(t, "status", nil)
+
+	load := e.startLoadROM(hangROM)
+	h.waitEntered(t)
+	ev := events.waitFor(t, "status", func(d json.RawMessage) bool {
+		var st gen.Status
+		return json.Unmarshal(d, &st) == nil && st.Busy != nil
+	})
+	if st := decodeEvent[gen.Status](t, ev); st.Busy.Operation != "loadRom" {
+		t.Fatalf("busy = %+v, want loadRom", st.Busy)
+	}
+
+	h.unblock()
+	r := waitResult(t, load, eventTimeout)
+	expectStatus(t, r.r, r.err, http.StatusOK)
+	events.waitFor(t, "status", func(d json.RawMessage) bool {
+		var st gen.Status
+		return json.Unmarshal(d, &st) == nil && st.Busy == nil
+	})
 }

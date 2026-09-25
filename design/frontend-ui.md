@@ -150,10 +150,11 @@ directory, log level, About.
 - Buttons are disabled (with a tooltip reason) when the emulator is
   disconnected, no ROM is loaded, or it is busy or unresponsive
   (`needEmu` / `needRom` in the status store include both).
-- Status events are not sent when an operation starts, so while a
-  tracked API call is pending or `busy` is set, the frontend polls
-  `/status` once a second. A missing `unresponsive` counts as false and a
-  missing `busy` as null.
+- The core sends a `status` event when an operation starts or ends and
+  when `unresponsive` flips. While a tracked API call is pending or `busy`
+  is set, the frontend ticks the elapsed time locally once a second; while
+  `busy` is set it also polls `/status` every 5 s as a fallback. A missing
+  `unresponsive` counts as false and a missing `busy` as null.
 - Errors from the API show in the log strip and as a transient toast.
   `BUSY`, `EMULATOR_TIMEOUT` and `EMULATOR_UNRESPONSIVE` read "Emulator is
   busy: <operation>", "Emulator did not answer in time" and "Emulator is

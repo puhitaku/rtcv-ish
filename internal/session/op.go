@@ -21,13 +21,17 @@ const maxWaitingOps = 4
 type opGate struct {
 	sem     chan struct{}
 	waiting atomic.Int32
+	// changed is signalled when the gate is acquired or released.
+	changed chan struct{}
 
 	mu    deadlock.Mutex
 	name  string
 	since time.Time
 }
 
-func newOpGate() *opGate { return &opGate{sem: make(chan struct{}, 1)} }
+func newOpGate() *opGate {
+	return &opGate{sem: make(chan struct{}, 1), changed: make(chan struct{}, 1)}
+}
 
 func (g *opGate) tryAcquire(name string) bool {
 	select {
@@ -66,21 +70,72 @@ func (g *opGate) release() {
 	g.name = ""
 	g.mu.Unlock()
 	<-g.sem
+	g.signal()
 }
 
 func (g *opGate) set(name string) {
 	g.mu.Lock()
 	g.name, g.since = name, time.Now()
 	g.mu.Unlock()
+	g.signal()
 }
 
-func (g *opGate) status() *BusyStatus {
+func (g *opGate) signal() {
+	select {
+	case g.changed <- struct{}{}:
+	default:
+	}
+}
+
+// gateState identifies the running operation; the zero value means idle.
+type gateState struct {
+	name  string
+	since time.Time
+}
+
+func (g *opGate) state() gateState {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.name == "" {
+		return gateState{}
+	}
+	return gateState{g.name, g.since}
+}
+
+func (g *opGate) status() *BusyStatus { return g.state().busy() }
+
+func (st gateState) busy() *BusyStatus {
+	if st.name == "" {
 		return nil
 	}
-	return &BusyStatus{Operation: g.name, SinceMs: time.Since(g.since).Milliseconds()}
+	return &BusyStatus{Operation: st.name, SinceMs: time.Since(st.since).Milliseconds()}
+}
+
+// busyEventInterval is the minimum time between status events published
+// for gate changes. Changes in between are coalesced, so an operation
+// yields at most one busy and one idle event.
+const busyEventInterval = 100 * time.Millisecond
+
+// busyLoop publishes a status event when the running operation changes.
+func (s *Session) busyLoop() {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.gate.changed:
+		}
+		s.mu.Lock()
+		if s.gate.state() != s.lastBusy {
+			s.publishStatusLocked()
+		}
+		s.mu.Unlock()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(busyEventInterval):
+		}
+	}
 }
 
 func (g *opGate) busy() error {

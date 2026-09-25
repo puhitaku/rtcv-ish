@@ -162,36 +162,45 @@ export const useStatusStore = defineStore('status', () => {
   }
 })
 
-/** Poll interval while a call is pending or the core reports busy. */
-export const BUSY_POLL_MS = 1000
+/** Tick interval of the local elapsed-time clock while busy. */
+export const BUSY_TICK_MS = 1000
+/** Fallback poll interval while the core reports `busy`. */
+export const BUSY_POLL_MS = 5000
 
 /**
- * Status events are not sent when an operation starts, so while an API call
- * is pending or the core reports `busy`, poll /status and tick the elapsed
- * time once a second. Registered by App for its lifetime.
+ * The core sends a `status` event when an operation starts or ends, so
+ * `busy` normally arrives over SSE. While an API call is pending or the
+ * core reports `busy`, tick the elapsed time once a second; while busy,
+ * also poll /status every BUSY_POLL_MS as a fallback for a missed event.
+ * Registered by App for its lifetime.
  */
 export function useBusyPoll() {
   const st = useStatusStore()
   let timer: ReturnType<typeof setTimeout> | undefined
   let polling = false
   let stopped = false
+  /** Milliseconds busy since the last poll (or since busy was seen). */
+  let sincePoll = 0
 
   const active = () => inflight.value > 0 || !!st.busy
 
   function schedule() {
+    if (!st.busy) sincePoll = 0
     if (stopped || timer || !active()) return
-    timer = setTimeout(run, BUSY_POLL_MS)
+    timer = setTimeout(run, BUSY_TICK_MS)
   }
 
   async function run() {
     timer = undefined
     st.tick()
-    if (!polling) {
+    if (st.busy) sincePoll += BUSY_TICK_MS
+    if (st.busy && sincePoll >= BUSY_POLL_MS && !polling) {
+      sincePoll = 0
       polling = true
       try {
         await st.poll()
       } catch {
-        // The SSE stream reports a lost core; keep polling while active.
+        // The SSE stream reports a lost core; keep polling while busy.
       } finally {
         polling = false
       }
