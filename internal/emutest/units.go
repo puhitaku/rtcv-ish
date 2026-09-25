@@ -203,11 +203,11 @@ var UnitCases = []UnitCase{
 		u.Step(1)
 		u.Want32(0, 0)
 	}},
-	{"loop reuses delay", func(u *U) {
+	{"loop delay 0 re-executes next frame", func(u *U) {
 		u.Apply(with(u.Value(1, 0, le32(3)), func(x *emulatorv1.Unit) { x.Delay = 2; x.Lifetime = 1; x.Loop = true }))
+		u.Step(2)
+		u.Want32(0, 0)
 		for range 3 {
-			u.Step(2)
-			u.Want32(0, 0)
 			u.Step(1)
 			u.Want32(0, 3)
 			u.Put32(0, 0)

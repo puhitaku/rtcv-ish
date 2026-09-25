@@ -100,9 +100,6 @@ func (s *Server) runUnits() {
 		}
 		u.running = false
 		u.wait = u.spec.GetLoopDelay()
-		if u.wait == 0 {
-			u.wait = u.spec.GetDelay()
-		}
 		return false
 	})
 }

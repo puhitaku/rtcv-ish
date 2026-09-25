@@ -227,13 +227,15 @@ typedef struct _rtcvish_emulator_v1_Unit {
  wrap-around integer arithmetic on the unit's size (1, 2, 4 or 8 bytes)
  and the domain's endianness. Ignored for value units. */
     int64_t tilt;
-    /* Frames to wait after apply (or after each loop) before executing. */
+    /* Frames to wait after apply before the first execution. */
     uint32_t delay;
     /* Number of frames the unit executes. 0 means forever. */
     uint32_t lifetime;
-    /* Re-schedule the unit after its lifetime ends, waiting loop_delay
- frames (or delay, if loop_delay is 0). */
+    /* Re-schedule the unit after its lifetime ends. Ignored when lifetime is 0. */
     bool loop;
+    /* Frames to wait after each loop before executing again, used as-is:
+ 0 executes again on the very next frame. delay applies only to the
+ first execution. */
     uint32_t loop_delay;
 } rtcvish_emulator_v1_Unit;
 

@@ -18,8 +18,9 @@ import (
 //     starts queueing samples at apply time and replays them ExecuteFrame
 //     frames late; the emulator samples live instead.
 //
-// ExecuteFrame, Lifetime, Loop and LoopTiming map to delay, lifetime, loop
-// and loop_delay. Tilt on sizes other than 1, 2, 4 and 8 bytes is dropped.
+// ExecuteFrame, Lifetime and Loop map to delay, lifetime and loop.
+// loop_delay is LoopTiming when set, else ExecuteFrame, like RTCV's
+// re-apply. Tilt on sizes other than 1, 2, 4 and 8 bytes is dropped.
 // Units whose domain is unknown or whose range leaves the domain are
 // skipped, like RTCV ignores out-of-range pokes. Invalid units are an
 // error.
@@ -54,8 +55,11 @@ func Rasterize(ctx context.Context, layer *Layer, mem Memory, nextID func() uint
 			Lifetime: uint32(u.Lifetime),
 			Loop:     u.Loop,
 		}
-		if u.LoopTiming > 0 {
-			eu.LoopDelay = uint32(u.LoopTiming)
+		if u.Loop {
+			eu.LoopDelay = uint32(u.ExecuteFrame)
+			if u.LoopTiming >= 0 {
+				eu.LoopDelay = uint32(u.LoopTiming)
+			}
 		}
 		switch {
 		case u.Source == SourceValue:

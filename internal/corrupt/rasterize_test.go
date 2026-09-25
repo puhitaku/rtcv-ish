@@ -43,7 +43,11 @@ func TestRasterize(t *testing.T) {
 	unsetLoop := value([]byte{1}, false, 0)
 	unsetLoop.Loop, unsetLoop.ExecuteFrame = true, 5
 	unsetLoopWant := vu(1)
-	unsetLoopWant.Loop, unsetLoopWant.Delay = true, 5
+	unsetLoopWant.Loop, unsetLoopWant.Delay, unsetLoopWant.LoopDelay = true, 5, 5
+	zeroLoop := value([]byte{1}, false, 0)
+	zeroLoop.Loop, zeroLoop.ExecuteFrame, zeroLoop.LoopTiming = true, 5, 0
+	zeroLoopWant := vu(1)
+	zeroLoopWant.Loop, zeroLoopWant.Delay = true, 5
 
 	tests := []struct {
 		name string
@@ -69,6 +73,7 @@ func TestRasterize(t *testing.T) {
 		{"store tilt dropped on 3 bytes", store(StoreOnce, StorePreExecute, "A", 3, false, big.NewInt(1)), su("A", 3, false, 0)},
 		{"timing", timed, timedWant},
 		{"loop timing unset", unsetLoop, unsetLoopWant},
+		{"loop timing zero", zeroLoop, zeroLoopWant},
 	}
 	for _, tt := range tests {
 		got, err := Rasterize(t.Context(), &Layer{Units: []*Unit{tt.unit}}, mem, func() uint64 { return 1 })

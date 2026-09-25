@@ -163,7 +163,7 @@ void Scheduler::runFrame(Backend& backend) {
             continue;
         }
         it->executing = false;
-        it->wait = u.loopDelay != 0 ? u.loopDelay : u.delay;
+        it->wait = u.loopDelay;
         it->sample.clear();
         ++it;
     }

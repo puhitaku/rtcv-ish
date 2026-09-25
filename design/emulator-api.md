@@ -103,14 +103,17 @@ Units implement RTCV's StepActions with a smaller model. For each frame
    write the sampled bytes (`continuous=true` re-samples every frame).
    Units execute in the order they were applied.
 3. Units whose lifetime is over are removed. If `loop` is set they are
-   re-queued with `loop_delay` (or `delay` if `loop_delay` is 0).
+   re-queued and wait exactly `loop_delay` frames (0 = they execute
+   again on the next frame). `delay` applies only to the first execution.
 
 A unit with `lifetime=0` never expires. The core enforces RTCV's
 "max infinite units" limit by removing the oldest ids itself.
 
 Timing, precisely: a unit applied with `delay=N` is skipped for the next
 N frames and first writes right before frame N+1. So after `Step(N)` the
-write is not visible yet, after `Step(N+1)` it is. A store unit reads its
+write is not visible yet, after `Step(N+1)` it is. Likewise, a looping
+unit whose last write was right before frame F writes again right before
+frame F+`loop_delay`+1. A store unit reads its
 source at the moment it writes (continuous) or when it first executes
 (once), so writes by earlier units in the same frame are visible to it.
 

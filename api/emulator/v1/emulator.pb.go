@@ -2693,13 +2693,15 @@ type Unit struct {
 	// wrap-around integer arithmetic on the unit's size (1, 2, 4 or 8 bytes)
 	// and the domain's endianness. Ignored for value units.
 	Tilt int64 `protobuf:"zigzag64,7,opt,name=tilt,proto3" json:"tilt,omitempty"`
-	// Frames to wait after apply (or after each loop) before executing.
+	// Frames to wait after apply before the first execution.
 	Delay uint32 `protobuf:"varint,8,opt,name=delay,proto3" json:"delay,omitempty"`
 	// Number of frames the unit executes. 0 means forever.
 	Lifetime uint32 `protobuf:"varint,9,opt,name=lifetime,proto3" json:"lifetime,omitempty"`
-	// Re-schedule the unit after its lifetime ends, waiting loop_delay
-	// frames (or delay, if loop_delay is 0).
-	Loop          bool   `protobuf:"varint,10,opt,name=loop,proto3" json:"loop,omitempty"`
+	// Re-schedule the unit after its lifetime ends. Ignored when lifetime is 0.
+	Loop bool `protobuf:"varint,10,opt,name=loop,proto3" json:"loop,omitempty"`
+	// Frames to wait after each loop before executing again, used as-is:
+	// 0 executes again on the very next frame. delay applies only to the
+	// first execution.
 	LoopDelay     uint32 `protobuf:"varint,11,opt,name=loop_delay,json=loopDelay,proto3" json:"loop_delay,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

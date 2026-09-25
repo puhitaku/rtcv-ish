@@ -51,7 +51,8 @@ Design notes:
   - `STORE` + `IMMEDIATE`: the core reads the source now and sends a value unit.
   - `STORE` + `PREEXECUTE` + `ONCE`: `Unit.store{continuous:false}`.
   - `STORE` + `CONTINUOUS`: `Unit.store{continuous:true}`.
-  - `ExecuteFrame`/`Lifetime`/`Loop`/`LoopTiming`: `delay`/`lifetime`/`loop`/`loop_delay`.
+  - `ExecuteFrame`/`Lifetime`/`Loop`: `delay`/`lifetime`/`loop`.
+  - `loop_delay` is filled by the core: `LoopTiming` when set, else `ExecuteFrame`.
   - Limiter checks at `PREEXECUTE`/`EXECUTE` time are not supported; only `GENERATE`.
 - Deterministic RNG: the core takes an optional seed (`--seed`) and tests
   always pass one. All randomness goes through one `*rand.Rand` (PCG).
