@@ -248,8 +248,8 @@ jobs:
           tar -tvzf "$NAME.tar.gz"
       - uses: actions/upload-artifact@v7
         with:
+          name: rtcv-ish-linux
           path: ${{ env.NAME }}.tar.gz
-          archive: false
 
   package-macos:
     name: Package macOS
@@ -291,8 +291,8 @@ jobs:
           unzip -l "$NAME.zip"
       - uses: actions/upload-artifact@v7
         with:
+          name: rtcv-ish-macos
           path: ${{ env.NAME }}.zip
-          archive: false
 
   package-windows:
     name: Package Windows
@@ -320,8 +320,8 @@ jobs:
           unzip -l "$NAME.zip"
       - uses: actions/upload-artifact@v7
         with:
+          name: rtcv-ish-windows
           path: ${{ env.NAME }}.zip
-          archive: false
 
   # On branches this is a dry run against the Unreleased section.
   release:
