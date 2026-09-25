@@ -122,6 +122,9 @@ message Capabilities {
   bool reset = 5;
   // Largest read/write/savestate payload the emulator accepts in one message.
   uint32 max_payload = 6;
+  // Unit modes beyond FRAME the emulator implements.
+  bool scanline_units = 7;
+  bool hard_units = 8;
 }
 
 message Status {
@@ -233,6 +236,21 @@ message Unit {
   // 0 executes again on the very next frame. delay applies only to the
   // first execution.
   uint32 loop_delay = 11;
+  // How the write is enforced while the unit executes (see Mode).
+  Mode mode = 12;
+}
+
+// FRAME writes once per frame before emulation (RTCV's behaviour).
+// SCANLINE also rewrites at every scanline, so a value the game
+// overwrites is restored within a fraction of a frame. HARD, for value
+// units only, additionally intercepts CPU and DMA writes to the unit's
+// bytes so the game never observes another value. Emulators that cannot
+// implement a mode fall back to the previous one and say so in
+// Capabilities.
+enum Mode {
+  FRAME = 0;
+  SCANLINE = 1;
+  HARD = 2;
 }
 
 message StoreSource {

@@ -106,6 +106,15 @@ Units implement RTCV's StepActions with a smaller model. For each frame
    re-queued and wait exactly `loop_delay` frames (0 = they execute
    again on the next frame). `delay` applies only to the first execution.
 
+`Unit.mode` selects how strongly the write is enforced: `FRAME` (once per
+frame, RTCV's behaviour), `SCANLINE` (rewritten at every scanline as well,
+so an overwritten value is restored within a fraction of a frame) and
+`HARD` (value units only: CPU and DMA writes to the unit's bytes are
+intercepted, so the game never observes another value; under the JIT the
+pages are write-protected so compiled code takes the slow path). An
+emulator that lacks a mode falls back to the previous one and reports
+what it supports in `Capabilities.scanline_units`/`hard_units`.
+
 A unit with `lifetime=0` never expires. The core enforces RTCV's
 "max infinite units" limit by removing the oldest ids itself.
 

@@ -30,6 +30,62 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// FRAME writes once per frame before emulation (RTCV's behaviour).
+// SCANLINE also rewrites at every scanline, so a value the game
+// overwrites is restored within a fraction of a frame. HARD, for value
+// units only, additionally intercepts CPU and DMA writes to the unit's
+// bytes so the game never observes another value. Emulators that cannot
+// implement a mode fall back to the previous one and say so in
+// Capabilities.
+type Mode int32
+
+const (
+	Mode_FRAME    Mode = 0
+	Mode_SCANLINE Mode = 1
+	Mode_HARD     Mode = 2
+)
+
+// Enum value maps for Mode.
+var (
+	Mode_name = map[int32]string{
+		0: "FRAME",
+		1: "SCANLINE",
+		2: "HARD",
+	}
+	Mode_value = map[string]int32{
+		"FRAME":    0,
+		"SCANLINE": 1,
+		"HARD":     2,
+	}
+)
+
+func (x Mode) Enum() *Mode {
+	p := new(Mode)
+	*p = x
+	return p
+}
+
+func (x Mode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Mode) Descriptor() protoreflect.EnumDescriptor {
+	return file_emulator_v1_emulator_proto_enumTypes[0].Descriptor()
+}
+
+func (Mode) Type() protoreflect.EnumType {
+	return &file_emulator_v1_emulator_proto_enumTypes[0]
+}
+
+func (x Mode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Mode.Descriptor instead.
+func (Mode) EnumDescriptor() ([]byte, []int) {
+	return file_emulator_v1_emulator_proto_rawDescGZIP(), []int{0}
+}
+
 type Error_Code int32
 
 const (
@@ -78,11 +134,11 @@ func (x Error_Code) String() string {
 }
 
 func (Error_Code) Descriptor() protoreflect.EnumDescriptor {
-	return file_emulator_v1_emulator_proto_enumTypes[0].Descriptor()
+	return file_emulator_v1_emulator_proto_enumTypes[1].Descriptor()
 }
 
 func (Error_Code) Type() protoreflect.EnumType {
-	return &file_emulator_v1_emulator_proto_enumTypes[0]
+	return &file_emulator_v1_emulator_proto_enumTypes[1]
 }
 
 func (x Error_Code) Number() protoreflect.EnumNumber {
@@ -127,11 +183,11 @@ func (x Status_State) String() string {
 }
 
 func (Status_State) Descriptor() protoreflect.EnumDescriptor {
-	return file_emulator_v1_emulator_proto_enumTypes[1].Descriptor()
+	return file_emulator_v1_emulator_proto_enumTypes[2].Descriptor()
 }
 
 func (Status_State) Type() protoreflect.EnumType {
-	return &file_emulator_v1_emulator_proto_enumTypes[1]
+	return &file_emulator_v1_emulator_proto_enumTypes[2]
 }
 
 func (x Status_State) Number() protoreflect.EnumNumber {
@@ -1348,7 +1404,10 @@ type Capabilities struct {
 	LoadRom    bool                   `protobuf:"varint,4,opt,name=load_rom,json=loadRom,proto3" json:"load_rom,omitempty"`
 	Reset_     bool                   `protobuf:"varint,5,opt,name=reset,proto3" json:"reset,omitempty"`
 	// Largest read/write/savestate payload the emulator accepts in one message.
-	MaxPayload    uint32 `protobuf:"varint,6,opt,name=max_payload,json=maxPayload,proto3" json:"max_payload,omitempty"`
+	MaxPayload uint32 `protobuf:"varint,6,opt,name=max_payload,json=maxPayload,proto3" json:"max_payload,omitempty"`
+	// Unit modes beyond FRAME the emulator implements.
+	ScanlineUnits bool `protobuf:"varint,7,opt,name=scanline_units,json=scanlineUnits,proto3" json:"scanline_units,omitempty"`
+	HardUnits     bool `protobuf:"varint,8,opt,name=hard_units,json=hardUnits,proto3" json:"hard_units,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1423,6 +1482,20 @@ func (x *Capabilities) GetMaxPayload() uint32 {
 		return x.MaxPayload
 	}
 	return 0
+}
+
+func (x *Capabilities) GetScanlineUnits() bool {
+	if x != nil {
+		return x.ScanlineUnits
+	}
+	return false
+}
+
+func (x *Capabilities) GetHardUnits() bool {
+	if x != nil {
+		return x.HardUnits
+	}
+	return false
 }
 
 type Status struct {
@@ -2702,7 +2775,9 @@ type Unit struct {
 	// Frames to wait after each loop before executing again, used as-is:
 	// 0 executes again on the very next frame. delay applies only to the
 	// first execution.
-	LoopDelay     uint32 `protobuf:"varint,11,opt,name=loop_delay,json=loopDelay,proto3" json:"loop_delay,omitempty"`
+	LoopDelay uint32 `protobuf:"varint,11,opt,name=loop_delay,json=loopDelay,proto3" json:"loop_delay,omitempty"`
+	// How the write is enforced while the unit executes (see Mode).
+	Mode          Mode `protobuf:"varint,12,opt,name=mode,proto3,enum=rtcvish.emulator.v1.Mode" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2823,6 +2898,13 @@ func (x *Unit) GetLoopDelay() uint32 {
 		return x.LoopDelay
 	}
 	return 0
+}
+
+func (x *Unit) GetMode() Mode {
+	if x != nil {
+		return x.Mode
+	}
+	return Mode_FRAME
 }
 
 type isUnit_Source interface {
@@ -3893,7 +3975,7 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"\bemulator\x18\x02 \x01(\tR\bemulator\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x16\n" +
 	"\x06system\x18\x04 \x01(\tR\x06system\x12E\n" +
-	"\fcapabilities\x18\x05 \x01(\v2!.rtcvish.emulator.v1.CapabilitiesR\fcapabilities\"\xb6\x01\n" +
+	"\fcapabilities\x18\x05 \x01(\v2!.rtcvish.emulator.v1.CapabilitiesR\fcapabilities\"\xfc\x01\n" +
 	"\fCapabilities\x12\x1e\n" +
 	"\n" +
 	"savestates\x18\x01 \x01(\bR\n" +
@@ -3905,7 +3987,10 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"\bload_rom\x18\x04 \x01(\bR\aloadRom\x12\x14\n" +
 	"\x05reset\x18\x05 \x01(\bR\x05reset\x12\x1f\n" +
 	"\vmax_payload\x18\x06 \x01(\rR\n" +
-	"maxPayload\"\xf6\x01\n" +
+	"maxPayload\x12%\n" +
+	"\x0escanline_units\x18\a \x01(\bR\rscanlineUnits\x12\x1d\n" +
+	"\n" +
+	"hard_units\x18\b \x01(\bR\thardUnits\"\xf6\x01\n" +
 	"\x06Status\x127\n" +
 	"\x05state\x18\x01 \x01(\x0e2!.rtcvish.emulator.v1.Status.StateR\x05state\x12\x14\n" +
 	"\x05frame\x18\x02 \x01(\x04R\x05frame\x12\x19\n" +
@@ -3971,7 +4056,7 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"\vStepRequest\x12\x16\n" +
 	"\x06frames\x18\x01 \x01(\rR\x06frames\"$\n" +
 	"\fStepResponse\x12\x14\n" +
-	"\x05frame\x18\x01 \x01(\x04R\x05frame\"\xb1\x02\n" +
+	"\x05frame\x18\x01 \x01(\x04R\x05frame\"\xe0\x02\n" +
 	"\x04Unit\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x16\n" +
 	"\x06domain\x18\x02 \x01(\tR\x06domain\x12\x18\n" +
@@ -3985,7 +4070,8 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"\x04loop\x18\n" +
 	" \x01(\bR\x04loop\x12\x1d\n" +
 	"\n" +
-	"loop_delay\x18\v \x01(\rR\tloopDelayB\b\n" +
+	"loop_delay\x18\v \x01(\rR\tloopDelay\x12-\n" +
+	"\x04mode\x18\f \x01(\x0e2\x19.rtcvish.emulator.v1.ModeR\x04modeB\b\n" +
 	"\x06source\"_\n" +
 	"\vStoreSource\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x18\n" +
@@ -4029,7 +4115,11 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"FrameEvent\x12\x14\n" +
 	"\x05frame\x18\x01 \x01(\x04R\x05frame\"B\n" +
 	"\vStatusEvent\x123\n" +
-	"\x06status\x18\x01 \x01(\v2\x1b.rtcvish.emulator.v1.StatusR\x06statusB9Z7github.com/puhitaku/rtcv-ish/api/emulator/v1;emulatorv1b\x06proto3"
+	"\x06status\x18\x01 \x01(\v2\x1b.rtcvish.emulator.v1.StatusR\x06status*)\n" +
+	"\x04Mode\x12\t\n" +
+	"\x05FRAME\x10\x00\x12\f\n" +
+	"\bSCANLINE\x10\x01\x12\b\n" +
+	"\x04HARD\x10\x02B9Z7github.com/puhitaku/rtcv-ish/api/emulator/v1;emulatorv1b\x06proto3"
 
 var (
 	file_emulator_v1_emulator_proto_rawDescOnce sync.Once
@@ -4043,140 +4133,142 @@ func file_emulator_v1_emulator_proto_rawDescGZIP() []byte {
 	return file_emulator_v1_emulator_proto_rawDescData
 }
 
-var file_emulator_v1_emulator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_emulator_v1_emulator_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_emulator_v1_emulator_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
 var file_emulator_v1_emulator_proto_goTypes = []any{
-	(Error_Code)(0),             // 0: rtcvish.emulator.v1.Error.Code
-	(Status_State)(0),           // 1: rtcvish.emulator.v1.Status.State
-	(*Message)(nil),             // 2: rtcvish.emulator.v1.Message
-	(*Request)(nil),             // 3: rtcvish.emulator.v1.Request
-	(*Response)(nil),            // 4: rtcvish.emulator.v1.Response
-	(*Event)(nil),               // 5: rtcvish.emulator.v1.Event
-	(*Error)(nil),               // 6: rtcvish.emulator.v1.Error
-	(*HelloRequest)(nil),        // 7: rtcvish.emulator.v1.HelloRequest
-	(*HelloResponse)(nil),       // 8: rtcvish.emulator.v1.HelloResponse
-	(*Capabilities)(nil),        // 9: rtcvish.emulator.v1.Capabilities
-	(*Status)(nil),              // 10: rtcvish.emulator.v1.Status
-	(*GetStatusRequest)(nil),    // 11: rtcvish.emulator.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),   // 12: rtcvish.emulator.v1.GetStatusResponse
-	(*Domain)(nil),              // 13: rtcvish.emulator.v1.Domain
-	(*ListDomainsRequest)(nil),  // 14: rtcvish.emulator.v1.ListDomainsRequest
-	(*ListDomainsResponse)(nil), // 15: rtcvish.emulator.v1.ListDomainsResponse
-	(*Range)(nil),               // 16: rtcvish.emulator.v1.Range
-	(*ReadRequest)(nil),         // 17: rtcvish.emulator.v1.ReadRequest
-	(*ReadResponse)(nil),        // 18: rtcvish.emulator.v1.ReadResponse
-	(*WriteChunk)(nil),          // 19: rtcvish.emulator.v1.WriteChunk
-	(*WriteRequest)(nil),        // 20: rtcvish.emulator.v1.WriteRequest
-	(*WriteResponse)(nil),       // 21: rtcvish.emulator.v1.WriteResponse
-	(*SaveStateRequest)(nil),    // 22: rtcvish.emulator.v1.SaveStateRequest
-	(*SaveStateResponse)(nil),   // 23: rtcvish.emulator.v1.SaveStateResponse
-	(*LoadStateRequest)(nil),    // 24: rtcvish.emulator.v1.LoadStateRequest
-	(*LoadStateResponse)(nil),   // 25: rtcvish.emulator.v1.LoadStateResponse
-	(*LoadRomRequest)(nil),      // 26: rtcvish.emulator.v1.LoadRomRequest
-	(*LoadRomResponse)(nil),     // 27: rtcvish.emulator.v1.LoadRomResponse
-	(*CloseRomRequest)(nil),     // 28: rtcvish.emulator.v1.CloseRomRequest
-	(*CloseRomResponse)(nil),    // 29: rtcvish.emulator.v1.CloseRomResponse
-	(*ResetRequest)(nil),        // 30: rtcvish.emulator.v1.ResetRequest
-	(*ResetResponse)(nil),       // 31: rtcvish.emulator.v1.ResetResponse
-	(*PauseRequest)(nil),        // 32: rtcvish.emulator.v1.PauseRequest
-	(*PauseResponse)(nil),       // 33: rtcvish.emulator.v1.PauseResponse
-	(*ResumeRequest)(nil),       // 34: rtcvish.emulator.v1.ResumeRequest
-	(*ResumeResponse)(nil),      // 35: rtcvish.emulator.v1.ResumeResponse
-	(*StepRequest)(nil),         // 36: rtcvish.emulator.v1.StepRequest
-	(*StepResponse)(nil),        // 37: rtcvish.emulator.v1.StepResponse
-	(*Unit)(nil),                // 38: rtcvish.emulator.v1.Unit
-	(*StoreSource)(nil),         // 39: rtcvish.emulator.v1.StoreSource
-	(*ApplyUnitsRequest)(nil),   // 40: rtcvish.emulator.v1.ApplyUnitsRequest
-	(*ApplyUnitsResponse)(nil),  // 41: rtcvish.emulator.v1.ApplyUnitsResponse
-	(*RemoveUnitsRequest)(nil),  // 42: rtcvish.emulator.v1.RemoveUnitsRequest
-	(*RemoveUnitsResponse)(nil), // 43: rtcvish.emulator.v1.RemoveUnitsResponse
-	(*ClearUnitsRequest)(nil),   // 44: rtcvish.emulator.v1.ClearUnitsRequest
-	(*ClearUnitsResponse)(nil),  // 45: rtcvish.emulator.v1.ClearUnitsResponse
-	(*ListUnitsRequest)(nil),    // 46: rtcvish.emulator.v1.ListUnitsRequest
-	(*ListUnitsResponse)(nil),   // 47: rtcvish.emulator.v1.ListUnitsResponse
-	(*SetInputRequest)(nil),     // 48: rtcvish.emulator.v1.SetInputRequest
-	(*SetInputResponse)(nil),    // 49: rtcvish.emulator.v1.SetInputResponse
-	(*Image)(nil),               // 50: rtcvish.emulator.v1.Image
-	(*ScreenshotRequest)(nil),   // 51: rtcvish.emulator.v1.ScreenshotRequest
-	(*ScreenshotResponse)(nil),  // 52: rtcvish.emulator.v1.ScreenshotResponse
-	(*SubscribeRequest)(nil),    // 53: rtcvish.emulator.v1.SubscribeRequest
-	(*SubscribeResponse)(nil),   // 54: rtcvish.emulator.v1.SubscribeResponse
-	(*PingRequest)(nil),         // 55: rtcvish.emulator.v1.PingRequest
-	(*PingResponse)(nil),        // 56: rtcvish.emulator.v1.PingResponse
-	(*QuitRequest)(nil),         // 57: rtcvish.emulator.v1.QuitRequest
-	(*QuitResponse)(nil),        // 58: rtcvish.emulator.v1.QuitResponse
-	(*FrameEvent)(nil),          // 59: rtcvish.emulator.v1.FrameEvent
-	(*StatusEvent)(nil),         // 60: rtcvish.emulator.v1.StatusEvent
+	(Mode)(0),                   // 0: rtcvish.emulator.v1.Mode
+	(Error_Code)(0),             // 1: rtcvish.emulator.v1.Error.Code
+	(Status_State)(0),           // 2: rtcvish.emulator.v1.Status.State
+	(*Message)(nil),             // 3: rtcvish.emulator.v1.Message
+	(*Request)(nil),             // 4: rtcvish.emulator.v1.Request
+	(*Response)(nil),            // 5: rtcvish.emulator.v1.Response
+	(*Event)(nil),               // 6: rtcvish.emulator.v1.Event
+	(*Error)(nil),               // 7: rtcvish.emulator.v1.Error
+	(*HelloRequest)(nil),        // 8: rtcvish.emulator.v1.HelloRequest
+	(*HelloResponse)(nil),       // 9: rtcvish.emulator.v1.HelloResponse
+	(*Capabilities)(nil),        // 10: rtcvish.emulator.v1.Capabilities
+	(*Status)(nil),              // 11: rtcvish.emulator.v1.Status
+	(*GetStatusRequest)(nil),    // 12: rtcvish.emulator.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),   // 13: rtcvish.emulator.v1.GetStatusResponse
+	(*Domain)(nil),              // 14: rtcvish.emulator.v1.Domain
+	(*ListDomainsRequest)(nil),  // 15: rtcvish.emulator.v1.ListDomainsRequest
+	(*ListDomainsResponse)(nil), // 16: rtcvish.emulator.v1.ListDomainsResponse
+	(*Range)(nil),               // 17: rtcvish.emulator.v1.Range
+	(*ReadRequest)(nil),         // 18: rtcvish.emulator.v1.ReadRequest
+	(*ReadResponse)(nil),        // 19: rtcvish.emulator.v1.ReadResponse
+	(*WriteChunk)(nil),          // 20: rtcvish.emulator.v1.WriteChunk
+	(*WriteRequest)(nil),        // 21: rtcvish.emulator.v1.WriteRequest
+	(*WriteResponse)(nil),       // 22: rtcvish.emulator.v1.WriteResponse
+	(*SaveStateRequest)(nil),    // 23: rtcvish.emulator.v1.SaveStateRequest
+	(*SaveStateResponse)(nil),   // 24: rtcvish.emulator.v1.SaveStateResponse
+	(*LoadStateRequest)(nil),    // 25: rtcvish.emulator.v1.LoadStateRequest
+	(*LoadStateResponse)(nil),   // 26: rtcvish.emulator.v1.LoadStateResponse
+	(*LoadRomRequest)(nil),      // 27: rtcvish.emulator.v1.LoadRomRequest
+	(*LoadRomResponse)(nil),     // 28: rtcvish.emulator.v1.LoadRomResponse
+	(*CloseRomRequest)(nil),     // 29: rtcvish.emulator.v1.CloseRomRequest
+	(*CloseRomResponse)(nil),    // 30: rtcvish.emulator.v1.CloseRomResponse
+	(*ResetRequest)(nil),        // 31: rtcvish.emulator.v1.ResetRequest
+	(*ResetResponse)(nil),       // 32: rtcvish.emulator.v1.ResetResponse
+	(*PauseRequest)(nil),        // 33: rtcvish.emulator.v1.PauseRequest
+	(*PauseResponse)(nil),       // 34: rtcvish.emulator.v1.PauseResponse
+	(*ResumeRequest)(nil),       // 35: rtcvish.emulator.v1.ResumeRequest
+	(*ResumeResponse)(nil),      // 36: rtcvish.emulator.v1.ResumeResponse
+	(*StepRequest)(nil),         // 37: rtcvish.emulator.v1.StepRequest
+	(*StepResponse)(nil),        // 38: rtcvish.emulator.v1.StepResponse
+	(*Unit)(nil),                // 39: rtcvish.emulator.v1.Unit
+	(*StoreSource)(nil),         // 40: rtcvish.emulator.v1.StoreSource
+	(*ApplyUnitsRequest)(nil),   // 41: rtcvish.emulator.v1.ApplyUnitsRequest
+	(*ApplyUnitsResponse)(nil),  // 42: rtcvish.emulator.v1.ApplyUnitsResponse
+	(*RemoveUnitsRequest)(nil),  // 43: rtcvish.emulator.v1.RemoveUnitsRequest
+	(*RemoveUnitsResponse)(nil), // 44: rtcvish.emulator.v1.RemoveUnitsResponse
+	(*ClearUnitsRequest)(nil),   // 45: rtcvish.emulator.v1.ClearUnitsRequest
+	(*ClearUnitsResponse)(nil),  // 46: rtcvish.emulator.v1.ClearUnitsResponse
+	(*ListUnitsRequest)(nil),    // 47: rtcvish.emulator.v1.ListUnitsRequest
+	(*ListUnitsResponse)(nil),   // 48: rtcvish.emulator.v1.ListUnitsResponse
+	(*SetInputRequest)(nil),     // 49: rtcvish.emulator.v1.SetInputRequest
+	(*SetInputResponse)(nil),    // 50: rtcvish.emulator.v1.SetInputResponse
+	(*Image)(nil),               // 51: rtcvish.emulator.v1.Image
+	(*ScreenshotRequest)(nil),   // 52: rtcvish.emulator.v1.ScreenshotRequest
+	(*ScreenshotResponse)(nil),  // 53: rtcvish.emulator.v1.ScreenshotResponse
+	(*SubscribeRequest)(nil),    // 54: rtcvish.emulator.v1.SubscribeRequest
+	(*SubscribeResponse)(nil),   // 55: rtcvish.emulator.v1.SubscribeResponse
+	(*PingRequest)(nil),         // 56: rtcvish.emulator.v1.PingRequest
+	(*PingResponse)(nil),        // 57: rtcvish.emulator.v1.PingResponse
+	(*QuitRequest)(nil),         // 58: rtcvish.emulator.v1.QuitRequest
+	(*QuitResponse)(nil),        // 59: rtcvish.emulator.v1.QuitResponse
+	(*FrameEvent)(nil),          // 60: rtcvish.emulator.v1.FrameEvent
+	(*StatusEvent)(nil),         // 61: rtcvish.emulator.v1.StatusEvent
 }
 var file_emulator_v1_emulator_proto_depIdxs = []int32{
-	3,  // 0: rtcvish.emulator.v1.Message.request:type_name -> rtcvish.emulator.v1.Request
-	4,  // 1: rtcvish.emulator.v1.Message.response:type_name -> rtcvish.emulator.v1.Response
-	5,  // 2: rtcvish.emulator.v1.Message.event:type_name -> rtcvish.emulator.v1.Event
-	7,  // 3: rtcvish.emulator.v1.Request.hello:type_name -> rtcvish.emulator.v1.HelloRequest
-	11, // 4: rtcvish.emulator.v1.Request.get_status:type_name -> rtcvish.emulator.v1.GetStatusRequest
-	14, // 5: rtcvish.emulator.v1.Request.list_domains:type_name -> rtcvish.emulator.v1.ListDomainsRequest
-	17, // 6: rtcvish.emulator.v1.Request.read:type_name -> rtcvish.emulator.v1.ReadRequest
-	20, // 7: rtcvish.emulator.v1.Request.write:type_name -> rtcvish.emulator.v1.WriteRequest
-	22, // 8: rtcvish.emulator.v1.Request.save_state:type_name -> rtcvish.emulator.v1.SaveStateRequest
-	24, // 9: rtcvish.emulator.v1.Request.load_state:type_name -> rtcvish.emulator.v1.LoadStateRequest
-	26, // 10: rtcvish.emulator.v1.Request.load_rom:type_name -> rtcvish.emulator.v1.LoadRomRequest
-	28, // 11: rtcvish.emulator.v1.Request.close_rom:type_name -> rtcvish.emulator.v1.CloseRomRequest
-	30, // 12: rtcvish.emulator.v1.Request.reset:type_name -> rtcvish.emulator.v1.ResetRequest
-	32, // 13: rtcvish.emulator.v1.Request.pause:type_name -> rtcvish.emulator.v1.PauseRequest
-	34, // 14: rtcvish.emulator.v1.Request.resume:type_name -> rtcvish.emulator.v1.ResumeRequest
-	36, // 15: rtcvish.emulator.v1.Request.step:type_name -> rtcvish.emulator.v1.StepRequest
-	40, // 16: rtcvish.emulator.v1.Request.apply_units:type_name -> rtcvish.emulator.v1.ApplyUnitsRequest
-	42, // 17: rtcvish.emulator.v1.Request.remove_units:type_name -> rtcvish.emulator.v1.RemoveUnitsRequest
-	44, // 18: rtcvish.emulator.v1.Request.clear_units:type_name -> rtcvish.emulator.v1.ClearUnitsRequest
-	46, // 19: rtcvish.emulator.v1.Request.list_units:type_name -> rtcvish.emulator.v1.ListUnitsRequest
-	48, // 20: rtcvish.emulator.v1.Request.set_input:type_name -> rtcvish.emulator.v1.SetInputRequest
-	51, // 21: rtcvish.emulator.v1.Request.screenshot:type_name -> rtcvish.emulator.v1.ScreenshotRequest
-	53, // 22: rtcvish.emulator.v1.Request.subscribe:type_name -> rtcvish.emulator.v1.SubscribeRequest
-	55, // 23: rtcvish.emulator.v1.Request.ping:type_name -> rtcvish.emulator.v1.PingRequest
-	57, // 24: rtcvish.emulator.v1.Request.quit:type_name -> rtcvish.emulator.v1.QuitRequest
-	6,  // 25: rtcvish.emulator.v1.Response.error:type_name -> rtcvish.emulator.v1.Error
-	8,  // 26: rtcvish.emulator.v1.Response.hello:type_name -> rtcvish.emulator.v1.HelloResponse
-	12, // 27: rtcvish.emulator.v1.Response.get_status:type_name -> rtcvish.emulator.v1.GetStatusResponse
-	15, // 28: rtcvish.emulator.v1.Response.list_domains:type_name -> rtcvish.emulator.v1.ListDomainsResponse
-	18, // 29: rtcvish.emulator.v1.Response.read:type_name -> rtcvish.emulator.v1.ReadResponse
-	21, // 30: rtcvish.emulator.v1.Response.write:type_name -> rtcvish.emulator.v1.WriteResponse
-	23, // 31: rtcvish.emulator.v1.Response.save_state:type_name -> rtcvish.emulator.v1.SaveStateResponse
-	25, // 32: rtcvish.emulator.v1.Response.load_state:type_name -> rtcvish.emulator.v1.LoadStateResponse
-	27, // 33: rtcvish.emulator.v1.Response.load_rom:type_name -> rtcvish.emulator.v1.LoadRomResponse
-	29, // 34: rtcvish.emulator.v1.Response.close_rom:type_name -> rtcvish.emulator.v1.CloseRomResponse
-	31, // 35: rtcvish.emulator.v1.Response.reset:type_name -> rtcvish.emulator.v1.ResetResponse
-	33, // 36: rtcvish.emulator.v1.Response.pause:type_name -> rtcvish.emulator.v1.PauseResponse
-	35, // 37: rtcvish.emulator.v1.Response.resume:type_name -> rtcvish.emulator.v1.ResumeResponse
-	37, // 38: rtcvish.emulator.v1.Response.step:type_name -> rtcvish.emulator.v1.StepResponse
-	41, // 39: rtcvish.emulator.v1.Response.apply_units:type_name -> rtcvish.emulator.v1.ApplyUnitsResponse
-	43, // 40: rtcvish.emulator.v1.Response.remove_units:type_name -> rtcvish.emulator.v1.RemoveUnitsResponse
-	45, // 41: rtcvish.emulator.v1.Response.clear_units:type_name -> rtcvish.emulator.v1.ClearUnitsResponse
-	47, // 42: rtcvish.emulator.v1.Response.list_units:type_name -> rtcvish.emulator.v1.ListUnitsResponse
-	49, // 43: rtcvish.emulator.v1.Response.set_input:type_name -> rtcvish.emulator.v1.SetInputResponse
-	52, // 44: rtcvish.emulator.v1.Response.screenshot:type_name -> rtcvish.emulator.v1.ScreenshotResponse
-	54, // 45: rtcvish.emulator.v1.Response.subscribe:type_name -> rtcvish.emulator.v1.SubscribeResponse
-	56, // 46: rtcvish.emulator.v1.Response.ping:type_name -> rtcvish.emulator.v1.PingResponse
-	58, // 47: rtcvish.emulator.v1.Response.quit:type_name -> rtcvish.emulator.v1.QuitResponse
-	59, // 48: rtcvish.emulator.v1.Event.frame:type_name -> rtcvish.emulator.v1.FrameEvent
-	60, // 49: rtcvish.emulator.v1.Event.status:type_name -> rtcvish.emulator.v1.StatusEvent
-	0,  // 50: rtcvish.emulator.v1.Error.code:type_name -> rtcvish.emulator.v1.Error.Code
-	9,  // 51: rtcvish.emulator.v1.HelloResponse.capabilities:type_name -> rtcvish.emulator.v1.Capabilities
-	1,  // 52: rtcvish.emulator.v1.Status.state:type_name -> rtcvish.emulator.v1.Status.State
-	10, // 53: rtcvish.emulator.v1.GetStatusResponse.status:type_name -> rtcvish.emulator.v1.Status
-	13, // 54: rtcvish.emulator.v1.ListDomainsResponse.domains:type_name -> rtcvish.emulator.v1.Domain
-	16, // 55: rtcvish.emulator.v1.ReadRequest.ranges:type_name -> rtcvish.emulator.v1.Range
-	19, // 56: rtcvish.emulator.v1.WriteRequest.chunks:type_name -> rtcvish.emulator.v1.WriteChunk
-	10, // 57: rtcvish.emulator.v1.LoadRomResponse.status:type_name -> rtcvish.emulator.v1.Status
-	39, // 58: rtcvish.emulator.v1.Unit.store:type_name -> rtcvish.emulator.v1.StoreSource
-	38, // 59: rtcvish.emulator.v1.ApplyUnitsRequest.units:type_name -> rtcvish.emulator.v1.Unit
-	38, // 60: rtcvish.emulator.v1.ListUnitsResponse.units:type_name -> rtcvish.emulator.v1.Unit
-	50, // 61: rtcvish.emulator.v1.ScreenshotResponse.screens:type_name -> rtcvish.emulator.v1.Image
-	10, // 62: rtcvish.emulator.v1.StatusEvent.status:type_name -> rtcvish.emulator.v1.Status
-	63, // [63:63] is the sub-list for method output_type
-	63, // [63:63] is the sub-list for method input_type
-	63, // [63:63] is the sub-list for extension type_name
-	63, // [63:63] is the sub-list for extension extendee
-	0,  // [0:63] is the sub-list for field type_name
+	4,  // 0: rtcvish.emulator.v1.Message.request:type_name -> rtcvish.emulator.v1.Request
+	5,  // 1: rtcvish.emulator.v1.Message.response:type_name -> rtcvish.emulator.v1.Response
+	6,  // 2: rtcvish.emulator.v1.Message.event:type_name -> rtcvish.emulator.v1.Event
+	8,  // 3: rtcvish.emulator.v1.Request.hello:type_name -> rtcvish.emulator.v1.HelloRequest
+	12, // 4: rtcvish.emulator.v1.Request.get_status:type_name -> rtcvish.emulator.v1.GetStatusRequest
+	15, // 5: rtcvish.emulator.v1.Request.list_domains:type_name -> rtcvish.emulator.v1.ListDomainsRequest
+	18, // 6: rtcvish.emulator.v1.Request.read:type_name -> rtcvish.emulator.v1.ReadRequest
+	21, // 7: rtcvish.emulator.v1.Request.write:type_name -> rtcvish.emulator.v1.WriteRequest
+	23, // 8: rtcvish.emulator.v1.Request.save_state:type_name -> rtcvish.emulator.v1.SaveStateRequest
+	25, // 9: rtcvish.emulator.v1.Request.load_state:type_name -> rtcvish.emulator.v1.LoadStateRequest
+	27, // 10: rtcvish.emulator.v1.Request.load_rom:type_name -> rtcvish.emulator.v1.LoadRomRequest
+	29, // 11: rtcvish.emulator.v1.Request.close_rom:type_name -> rtcvish.emulator.v1.CloseRomRequest
+	31, // 12: rtcvish.emulator.v1.Request.reset:type_name -> rtcvish.emulator.v1.ResetRequest
+	33, // 13: rtcvish.emulator.v1.Request.pause:type_name -> rtcvish.emulator.v1.PauseRequest
+	35, // 14: rtcvish.emulator.v1.Request.resume:type_name -> rtcvish.emulator.v1.ResumeRequest
+	37, // 15: rtcvish.emulator.v1.Request.step:type_name -> rtcvish.emulator.v1.StepRequest
+	41, // 16: rtcvish.emulator.v1.Request.apply_units:type_name -> rtcvish.emulator.v1.ApplyUnitsRequest
+	43, // 17: rtcvish.emulator.v1.Request.remove_units:type_name -> rtcvish.emulator.v1.RemoveUnitsRequest
+	45, // 18: rtcvish.emulator.v1.Request.clear_units:type_name -> rtcvish.emulator.v1.ClearUnitsRequest
+	47, // 19: rtcvish.emulator.v1.Request.list_units:type_name -> rtcvish.emulator.v1.ListUnitsRequest
+	49, // 20: rtcvish.emulator.v1.Request.set_input:type_name -> rtcvish.emulator.v1.SetInputRequest
+	52, // 21: rtcvish.emulator.v1.Request.screenshot:type_name -> rtcvish.emulator.v1.ScreenshotRequest
+	54, // 22: rtcvish.emulator.v1.Request.subscribe:type_name -> rtcvish.emulator.v1.SubscribeRequest
+	56, // 23: rtcvish.emulator.v1.Request.ping:type_name -> rtcvish.emulator.v1.PingRequest
+	58, // 24: rtcvish.emulator.v1.Request.quit:type_name -> rtcvish.emulator.v1.QuitRequest
+	7,  // 25: rtcvish.emulator.v1.Response.error:type_name -> rtcvish.emulator.v1.Error
+	9,  // 26: rtcvish.emulator.v1.Response.hello:type_name -> rtcvish.emulator.v1.HelloResponse
+	13, // 27: rtcvish.emulator.v1.Response.get_status:type_name -> rtcvish.emulator.v1.GetStatusResponse
+	16, // 28: rtcvish.emulator.v1.Response.list_domains:type_name -> rtcvish.emulator.v1.ListDomainsResponse
+	19, // 29: rtcvish.emulator.v1.Response.read:type_name -> rtcvish.emulator.v1.ReadResponse
+	22, // 30: rtcvish.emulator.v1.Response.write:type_name -> rtcvish.emulator.v1.WriteResponse
+	24, // 31: rtcvish.emulator.v1.Response.save_state:type_name -> rtcvish.emulator.v1.SaveStateResponse
+	26, // 32: rtcvish.emulator.v1.Response.load_state:type_name -> rtcvish.emulator.v1.LoadStateResponse
+	28, // 33: rtcvish.emulator.v1.Response.load_rom:type_name -> rtcvish.emulator.v1.LoadRomResponse
+	30, // 34: rtcvish.emulator.v1.Response.close_rom:type_name -> rtcvish.emulator.v1.CloseRomResponse
+	32, // 35: rtcvish.emulator.v1.Response.reset:type_name -> rtcvish.emulator.v1.ResetResponse
+	34, // 36: rtcvish.emulator.v1.Response.pause:type_name -> rtcvish.emulator.v1.PauseResponse
+	36, // 37: rtcvish.emulator.v1.Response.resume:type_name -> rtcvish.emulator.v1.ResumeResponse
+	38, // 38: rtcvish.emulator.v1.Response.step:type_name -> rtcvish.emulator.v1.StepResponse
+	42, // 39: rtcvish.emulator.v1.Response.apply_units:type_name -> rtcvish.emulator.v1.ApplyUnitsResponse
+	44, // 40: rtcvish.emulator.v1.Response.remove_units:type_name -> rtcvish.emulator.v1.RemoveUnitsResponse
+	46, // 41: rtcvish.emulator.v1.Response.clear_units:type_name -> rtcvish.emulator.v1.ClearUnitsResponse
+	48, // 42: rtcvish.emulator.v1.Response.list_units:type_name -> rtcvish.emulator.v1.ListUnitsResponse
+	50, // 43: rtcvish.emulator.v1.Response.set_input:type_name -> rtcvish.emulator.v1.SetInputResponse
+	53, // 44: rtcvish.emulator.v1.Response.screenshot:type_name -> rtcvish.emulator.v1.ScreenshotResponse
+	55, // 45: rtcvish.emulator.v1.Response.subscribe:type_name -> rtcvish.emulator.v1.SubscribeResponse
+	57, // 46: rtcvish.emulator.v1.Response.ping:type_name -> rtcvish.emulator.v1.PingResponse
+	59, // 47: rtcvish.emulator.v1.Response.quit:type_name -> rtcvish.emulator.v1.QuitResponse
+	60, // 48: rtcvish.emulator.v1.Event.frame:type_name -> rtcvish.emulator.v1.FrameEvent
+	61, // 49: rtcvish.emulator.v1.Event.status:type_name -> rtcvish.emulator.v1.StatusEvent
+	1,  // 50: rtcvish.emulator.v1.Error.code:type_name -> rtcvish.emulator.v1.Error.Code
+	10, // 51: rtcvish.emulator.v1.HelloResponse.capabilities:type_name -> rtcvish.emulator.v1.Capabilities
+	2,  // 52: rtcvish.emulator.v1.Status.state:type_name -> rtcvish.emulator.v1.Status.State
+	11, // 53: rtcvish.emulator.v1.GetStatusResponse.status:type_name -> rtcvish.emulator.v1.Status
+	14, // 54: rtcvish.emulator.v1.ListDomainsResponse.domains:type_name -> rtcvish.emulator.v1.Domain
+	17, // 55: rtcvish.emulator.v1.ReadRequest.ranges:type_name -> rtcvish.emulator.v1.Range
+	20, // 56: rtcvish.emulator.v1.WriteRequest.chunks:type_name -> rtcvish.emulator.v1.WriteChunk
+	11, // 57: rtcvish.emulator.v1.LoadRomResponse.status:type_name -> rtcvish.emulator.v1.Status
+	40, // 58: rtcvish.emulator.v1.Unit.store:type_name -> rtcvish.emulator.v1.StoreSource
+	0,  // 59: rtcvish.emulator.v1.Unit.mode:type_name -> rtcvish.emulator.v1.Mode
+	39, // 60: rtcvish.emulator.v1.ApplyUnitsRequest.units:type_name -> rtcvish.emulator.v1.Unit
+	39, // 61: rtcvish.emulator.v1.ListUnitsResponse.units:type_name -> rtcvish.emulator.v1.Unit
+	51, // 62: rtcvish.emulator.v1.ScreenshotResponse.screens:type_name -> rtcvish.emulator.v1.Image
+	11, // 63: rtcvish.emulator.v1.StatusEvent.status:type_name -> rtcvish.emulator.v1.Status
+	64, // [64:64] is the sub-list for method output_type
+	64, // [64:64] is the sub-list for method input_type
+	64, // [64:64] is the sub-list for extension type_name
+	64, // [64:64] is the sub-list for extension extendee
+	0,  // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_emulator_v1_emulator_proto_init() }
@@ -4251,7 +4343,7 @@ func file_emulator_v1_emulator_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_emulator_v1_emulator_proto_rawDesc), len(file_emulator_v1_emulator_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   59,
 			NumExtensions: 0,
 			NumServices:   0,
