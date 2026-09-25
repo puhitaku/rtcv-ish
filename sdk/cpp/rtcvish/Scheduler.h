@@ -34,8 +34,13 @@ public:
 
     void clear();
 
-    // Units that are queued or executing, in apply order.
-    std::vector<Unit> list() const;
+    // Call f(const Unit&) for every queued or executing unit, in apply
+    // order, without copying.
+    template <typename F> void forEach(F&& f) const {
+        for (const auto& e : entries_) {
+            f(e.unit);
+        }
+    }
 
     size_t size() const { return entries_.size(); }
 

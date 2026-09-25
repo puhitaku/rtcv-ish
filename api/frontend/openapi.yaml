@@ -420,7 +420,7 @@ paths:
       tags: [blast]
       responses:
         "200":
-          description: Units currently scheduled in the emulator.
+          description: Units currently scheduled in the emulator, in apply order. Values are not listed (`value` is empty).
           content:
             application/json:
               schema:
@@ -1646,7 +1646,7 @@ components:
 
     EmuUnit:
       type: object
-      description: A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set.
+      description: A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set; `value` is empty when the listing omits values.
       required: [id, domain, address, size, tilt, delay, lifetime, loop, loopDelay, mode]
       properties:
         id: { type: integer, format: int64 }

@@ -1461,7 +1461,7 @@ export interface components {
             address: number;
             continuous: boolean;
         };
-        /** @description A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set. */
+        /** @description A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set; `value` is empty when the listing omits values. */
         EmuUnit: {
             /** Format: int64 */
             id: number;
@@ -2132,7 +2132,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Units currently scheduled in the emulator. */
+            /** @description Units currently scheduled in the emulator, in apply order. Values are not listed (`value` is empty). */
             200: {
                 headers: {
                     [name: string]: unknown;

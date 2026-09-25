@@ -3220,7 +3220,12 @@ func (*ClearUnitsResponse) Descriptor() ([]byte, []int) {
 }
 
 type ListUnitsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// false (default): value units are listed with an empty value and their
+	// size set, so the response stays small however large the units are.
+	// Store units are listed unchanged. true: values are included, which
+	// can exceed the message size limit with many large units.
+	IncludeValues bool `protobuf:"varint,1,opt,name=include_values,json=includeValues,proto3" json:"include_values,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3255,9 +3260,16 @@ func (*ListUnitsRequest) Descriptor() ([]byte, []int) {
 	return file_emulator_v1_emulator_proto_rawDescGZIP(), []int{44}
 }
 
+func (x *ListUnitsRequest) GetIncludeValues() bool {
+	if x != nil {
+		return x.IncludeValues
+	}
+	return false
+}
+
 type ListUnitsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Units that are queued or executing.
+	// Units that are queued or executing, in apply order.
 	Units         []*Unit `protobuf:"bytes,1,rep,name=units,proto3" json:"units,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4086,8 +4098,9 @@ const file_emulator_v1_emulator_proto_rawDesc = "" +
 	"\x03ids\x18\x01 \x03(\x04R\x03ids\"\x15\n" +
 	"\x13RemoveUnitsResponse\"\x13\n" +
 	"\x11ClearUnitsRequest\"\x14\n" +
-	"\x12ClearUnitsResponse\"\x12\n" +
-	"\x10ListUnitsRequest\"D\n" +
+	"\x12ClearUnitsResponse\"9\n" +
+	"\x10ListUnitsRequest\x12%\n" +
+	"\x0einclude_values\x18\x01 \x01(\bR\rincludeValues\"D\n" +
 	"\x11ListUnitsResponse\x12/\n" +
 	"\x05units\x18\x01 \x03(\v2\x19.rtcvish.emulator.v1.UnitR\x05units\"\x89\x01\n" +
 	"\x0fSetInputRequest\x12\x18\n" +

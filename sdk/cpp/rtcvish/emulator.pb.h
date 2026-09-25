@@ -284,11 +284,15 @@ typedef struct _rtcvish_emulator_v1_ClearUnitsResponse {
 } rtcvish_emulator_v1_ClearUnitsResponse;
 
 typedef struct _rtcvish_emulator_v1_ListUnitsRequest {
-    char dummy_field;
+    /* false (default): value units are listed with an empty value and their
+ size set, so the response stays small however large the units are.
+ Store units are listed unchanged. true: values are included, which
+ can exceed the message size limit with many large units. */
+    bool include_values;
 } rtcvish_emulator_v1_ListUnitsRequest;
 
 typedef struct _rtcvish_emulator_v1_ListUnitsResponse {
-    /* Units that are queued or executing. */
+    /* Units that are queued or executing, in apply order. */
     pb_size_t units_count;
     struct _rtcvish_emulator_v1_Unit *units;
 } rtcvish_emulator_v1_ListUnitsResponse;
@@ -699,6 +703,7 @@ extern "C" {
 #define rtcvish_emulator_v1_Unit_mode_tag        12
 #define rtcvish_emulator_v1_ApplyUnitsRequest_units_tag 1
 #define rtcvish_emulator_v1_RemoveUnitsRequest_ids_tag 1
+#define rtcvish_emulator_v1_ListUnitsRequest_include_values_tag 1
 #define rtcvish_emulator_v1_ListUnitsResponse_units_tag 1
 #define rtcvish_emulator_v1_SetInputRequest_buttons_tag 1
 #define rtcvish_emulator_v1_SetInputRequest_touch_tag 2
@@ -1133,7 +1138,7 @@ X(a, POINTER,  REPEATED, UINT64,   ids,               1)
 #define rtcvish_emulator_v1_ClearUnitsResponse_DEFAULT NULL
 
 #define rtcvish_emulator_v1_ListUnitsRequest_FIELDLIST(X, a) \
-
+X(a, STATIC,   SINGULAR, BOOL,     include_values,    1)
 #define rtcvish_emulator_v1_ListUnitsRequest_CALLBACK NULL
 #define rtcvish_emulator_v1_ListUnitsRequest_DEFAULT NULL
 
@@ -1376,7 +1381,7 @@ extern const pb_msgdesc_t rtcvish_emulator_v1_StatusEvent_msg;
 #define rtcvish_emulator_v1_FrameEvent_size      11
 #define rtcvish_emulator_v1_GetStatusRequest_size 0
 #define rtcvish_emulator_v1_ListDomainsRequest_size 0
-#define rtcvish_emulator_v1_ListUnitsRequest_size 0
+#define rtcvish_emulator_v1_ListUnitsRequest_size 2
 #define rtcvish_emulator_v1_LoadStateResponse_size 0
 #define rtcvish_emulator_v1_PauseRequest_size    0
 #define rtcvish_emulator_v1_PauseResponse_size   0

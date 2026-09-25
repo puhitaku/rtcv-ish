@@ -136,7 +136,7 @@ void toPb(const Capabilities& in, rtcvish_emulator_v1_Capabilities& out) {
     out.hard_units = in.hardUnits;
 }
 
-void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out) {
+void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out, bool includeValue) {
     out.id = in.id;
     out.domain = copyString(in.domain);
     out.address = in.address;
@@ -148,7 +148,8 @@ void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out) {
         out.source.store.continuous = in.continuous;
     } else {
         out.which_source = rtcvish_emulator_v1_Unit_value_tag;
-        out.source.value = copyBytes(in.value.data(), in.value.size());
+        out.source.value =
+            includeValue ? copyBytes(in.value.data(), in.value.size()) : allocBytes(0);
     }
     out.tilt = in.tilt;
     out.delay = in.delay;

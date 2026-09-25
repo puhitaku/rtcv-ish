@@ -742,14 +742,13 @@ void Server::runJob(const ConnPtr& conn, const MsgPtr& msg) {
         break;
 
     case rtcvish_emulator_v1_Request_list_units_tag: {
-        std::vector<Unit> units = scheduler_.list();
+        const bool withValues = req.body.list_units.include_values;
         resp.which_body = rtcvish_emulator_v1_Response_list_units_tag;
         auto& r = resp.body.list_units;
-        r.units = wire::allocArray<rtcvish_emulator_v1_Unit>(units.size());
-        r.units_count = pb_size_t(units.size());
-        for (size_t i = 0; i < units.size(); i++) {
-            wire::toPb(units[i], r.units[i]);
-        }
+        r.units = wire::allocArray<rtcvish_emulator_v1_Unit>(scheduler_.size());
+        r.units_count = pb_size_t(scheduler_.size());
+        size_t i = 0;
+        scheduler_.forEach([&](const Unit& u) { wire::toPb(u, r.units[i++], withValues); });
         break;
     }
 

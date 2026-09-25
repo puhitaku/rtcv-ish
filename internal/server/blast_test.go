@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -205,8 +206,12 @@ func TestApplyLayerUnits(t *testing.T) {
 				u.Delay != tc.want.delay || u.Lifetime != tc.want.lifetime || u.Loop != tc.want.loop || u.LoopDelay != tc.want.loopDelay {
 				t.Errorf("scheduled %+v, want %+v", u, tc.want)
 			}
-			if tc.want.value != "" && (u.Value == nil || *u.Value != tc.want.value || u.Store != nil) {
-				t.Errorf("value/store = %v/%+v, want value %q", u.Value, u.Store, tc.want.value)
+			// The listing omits values: check them in the emulator.
+			if tc.want.value != "" && (u.Value == nil || *u.Value != "" || u.Store != nil) {
+				t.Errorf("value/store = %v/%+v, want an empty value", u.Value, u.Store)
+			}
+			if fu := e.fake.Units(); tc.want.value != "" && (len(fu) != 1 || hex.EncodeToString(fu[0].GetValue()) != tc.want.value) {
+				t.Errorf("emulator units = %v, want value %q", fu, tc.want.value)
 			}
 			if tc.want.store != nil && (u.Store == nil || *u.Store != *tc.want.store || u.Value != nil) {
 				t.Errorf("value/store = %v/%+v, want store %+v", u.Value, u.Store, *tc.want.store)

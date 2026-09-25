@@ -142,15 +142,6 @@ void Scheduler::clear() {
     refresh();
 }
 
-std::vector<Unit> Scheduler::list() const {
-    std::vector<Unit> out;
-    out.reserve(entries_.size());
-    for (const auto& e : entries_) {
-        out.push_back(e.unit);
-    }
-    return out;
-}
-
 bool Scheduler::sample(Backend& backend, Entry& e) {
     const Unit& u = e.unit;
     e.sample.resize(u.size);

@@ -232,6 +232,17 @@ func (s *Server) Memory(domain string) []byte {
 	return nil
 }
 
+// Units returns copies of the scheduled units, values included.
+func (s *Server) Units() []*emulatorv1.Unit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*emulatorv1.Unit, 0, len(s.units))
+	for _, u := range s.units {
+		out = append(out, listedUnit(u.spec, true))
+	}
+	return out
+}
+
 func (s *Server) acceptLoop() {
 	defer s.wg.Done()
 	for {

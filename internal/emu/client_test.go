@@ -13,6 +13,7 @@ import (
 	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/emu/fake"
 	"github.com/puhitaku/rtcv-ish/internal/emutest"
+	"google.golang.org/protobuf/proto"
 )
 
 func startFake(t *testing.T, opts fake.Options) *fake.Server {
@@ -249,6 +250,43 @@ func TestLoadStateKeepsUnits(t *testing.T) {
 	}
 	if units, _ := c.ListUnits(ctx); len(units) != 1 {
 		t.Errorf("units after LoadState = %v", units)
+	}
+}
+
+func TestListUnitsValues(t *testing.T) {
+	_, c := loaded(t, fake.Options{Manual: true})
+	ctx := t.Context()
+	value := &emulatorv1.Unit{Id: 1, Domain: "MainRAM", Address: 0x100, Size: 4, Delay: 5, Source: &emulatorv1.Unit_Value{Value: []byte{1, 2, 3, 4}}}
+	store := &emulatorv1.Unit{
+		Id: 2, Domain: "MainRAM", Address: 0x200, Size: 2, Tilt: -3,
+		Source: &emulatorv1.Unit_Store{Store: &emulatorv1.StoreSource{Domain: "VRAM", Address: 0x10, Continuous: true}},
+	}
+	if err := c.ApplyUnits(ctx, []*emulatorv1.Unit{value, store}); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := c.ListUnitsFull(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 2 || !proto.Equal(full[0], value) || !proto.Equal(full[1], store) {
+		t.Errorf("ListUnitsFull = %v, want %v, %v", full, value, store)
+	}
+
+	elided, err := c.ListUnits(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(elided) != 2 {
+		t.Fatalf("ListUnits = %v", elided)
+	}
+	want := proto.Clone(value).(*emulatorv1.Unit)
+	want.Source = &emulatorv1.Unit_Value{Value: []byte{}}
+	if u := elided[0]; !proto.Equal(u, want) {
+		t.Errorf("elided value unit = %v, want %v", u, want)
+	}
+	if !proto.Equal(elided[1], store) {
+		t.Errorf("elided store unit = %v, want %v", elided[1], store)
 	}
 }
 

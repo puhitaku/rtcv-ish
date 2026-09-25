@@ -9,6 +9,7 @@ import (
 
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 	"github.com/puhitaku/rtcv-ish/internal/emu"
+	"google.golang.org/protobuf/proto"
 )
 
 // U drives unit scheduler tests on a scratch area with Step.
@@ -248,8 +249,8 @@ var UnitCases = []UnitCase{
 	{"list remove clear", func(u *U) {
 		u.Apply(u.Value(1, 0, le32(1)), u.Value(2, 4, le32(2)), with(u.Value(3, 8, le32(3)), func(x *emulatorv1.Unit) { x.Delay = 100 }))
 		u.WantIDs(1, 2, 3)
-		units, err := u.c.ListUnits(u.ctx)
-		must(u.t, err, "ListUnits")
+		units, err := u.c.ListUnitsFull(u.ctx)
+		must(u.t, err, "ListUnitsFull")
 		if got := units[2]; got.GetDelay() != 100 || !bytes.Equal(got.GetValue(), le32(3)) || got.GetAddress() != u.addr(8) {
 			u.t.Errorf("listed unit = %v", got)
 		}
@@ -262,6 +263,23 @@ var UnitCases = []UnitCase{
 		u.Put32(0, 0)
 		u.Step(1)
 		u.Want32(0, 0)
+	}},
+	{"list values elided", func(u *U) {
+		value := with(u.Value(1, 0, le32(0x11223344)), func(x *emulatorv1.Unit) { x.Delay = 100 })
+		store := with(u.Store(2, 4, 8, 4, true, -2), func(x *emulatorv1.Unit) { x.Delay = 100 })
+		u.Apply(value, store)
+		full, err := u.c.ListUnitsFull(u.ctx)
+		must(u.t, err, "ListUnitsFull")
+		if len(full) != 2 || !proto.Equal(full[0], value) || !proto.Equal(full[1], store) {
+			u.t.Errorf("ListUnitsFull = %v, want [%v %v]", full, value, store)
+		}
+		elided, err := u.c.ListUnits(u.ctx)
+		must(u.t, err, "ListUnits")
+		want := proto.Clone(value).(*emulatorv1.Unit)
+		want.Source = &emulatorv1.Unit_Value{Value: []byte{}}
+		if len(elided) != 2 || !proto.Equal(elided[0], want) || !proto.Equal(elided[1], store) {
+			u.t.Errorf("ListUnits = %v, want [%v %v]", elided, want, store)
+		}
 	}},
 	{"modes accepted", func(u *U) {
 		u.Apply(withMode(u.Value(1, 0, le32(1)), emulatorv1.Mode_SCANLINE), withMode(u.Value(2, 4, le32(2)), emulatorv1.Mode_HARD))

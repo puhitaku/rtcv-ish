@@ -270,9 +270,15 @@ message RemoveUnitsResponse {}
 message ClearUnitsRequest {}
 message ClearUnitsResponse {}
 
-message ListUnitsRequest {}
+message ListUnitsRequest {
+  // false (default): value units are listed with an empty value and their
+  // size set, so the response stays small however large the units are.
+  // Store units are listed unchanged. true: values are included, which
+  // can exceed the message size limit with many large units.
+  bool include_values = 1;
+}
 message ListUnitsResponse {
-  // Units that are queued or executing.
+  // Units that are queued or executing, in apply order.
   repeated Unit units = 1;
 }
 

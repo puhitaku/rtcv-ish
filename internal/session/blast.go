@@ -268,13 +268,14 @@ func (s *Session) checkTargetsLocked(l *corrupt.Layer) error {
 	return classify(l.CheckRanges(s.domains))
 }
 
-// EmuUnit is a unit scheduled in the emulator.
+// EmuUnit is a unit scheduled in the emulator. Listings omit values, so
+// Value is empty (but set) for value units.
 type EmuUnit struct {
 	ID        uint64       `json:"id"`
 	Domain    string       `json:"domain"`
 	Address   uint64       `json:"address"`
 	Size      uint32       `json:"size"`
-	Value     corrupt.Hex  `json:"value,omitempty"`
+	Value     *corrupt.Hex `json:"value,omitempty"`
 	Store     *StoreSource `json:"store,omitempty"`
 	Tilt      int64        `json:"tilt"`
 	Delay     uint32       `json:"delay"`
@@ -291,6 +292,8 @@ type StoreSource struct {
 	Continuous bool   `json:"continuous"`
 }
 
+// Units lists the units scheduled in the emulator without their values,
+// which can be too large for one emulator API message.
 func (s *Session) Units(ctx context.Context) ([]EmuUnit, error) {
 	ctx, cancel := s.opCtx(ctx)
 	defer cancel()
@@ -312,7 +315,7 @@ func (s *Session) Units(ctx context.Context) ([]EmuUnit, error) {
 		if st := u.GetStore(); st != nil {
 			eu.Store = &StoreSource{Domain: st.GetDomain(), Address: st.GetAddress(), Continuous: st.GetContinuous()}
 		} else {
-			eu.Value = u.GetValue()
+			eu.Value = &corrupt.Hex{}
 		}
 		out = append(out, eu)
 	}

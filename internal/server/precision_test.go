@@ -53,6 +53,42 @@ func TestApplyLargeUnit(t *testing.T) {
 	}
 }
 
+// Listing units omits values, so several maximum-size units, together
+// far above the emulator API message cap, still list.
+func TestListLargeUnits(t *testing.T) {
+	const (
+		hugeRAM = "HugeRAM"
+		size    = 16 << 20
+		count   = 5
+	)
+	e := newEnv(t, envOptions{fake: fake.Options{
+		Domains: append(fake.DefaultDomains(), fake.Domain{Name: hugeRAM, Size: 100 << 20, WordSize: 4}),
+	}})
+	value := patternHex(size)
+	for i := range count {
+		e.applyLayer(gen.Layer{Units: []gen.Unit{valueUnit(hugeRAM, int64(i*size), value)}}, false)
+	}
+	us := e.units()
+	if len(us) != count {
+		t.Fatalf("listed %d units, want %d", len(us), count)
+	}
+	for i, u := range us {
+		if u.Domain != hugeRAM || u.Address != int64(i*size) || u.Size != size || u.Value == nil || *u.Value != "" || u.Store != nil {
+			t.Errorf("unit %d = %+v, want a %d-byte value unit at 0x%x without its value", i, u, size, i*size)
+		}
+	}
+
+	r, err := e.c.RemoveUnitWithResponse(e.ctx, us[1].Id)
+	expectStatus(t, r, err, http.StatusNoContent)
+	if n := len(e.units()); n != count-1 {
+		t.Errorf("listed %d units after removing one, want %d", n, count-1)
+	}
+	e.fake.Tick(1)
+	if got, want := e.readMem(hugeRAM, 4*size+size-16, 16), value[2*(size-16):]; got != want {
+		t.Errorf("last unit's tail = %s, want %s", got, want)
+	}
+}
+
 func TestApplyPrecisionLimits(t *testing.T) {
 	e := bigEnv(t)
 	u := valueUnit(bigRAM, 0, "00")

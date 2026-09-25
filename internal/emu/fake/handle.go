@@ -204,8 +204,9 @@ func (s *Server) handle(c *conn, req *emulatorv1.Request) *emulatorv1.Response {
 
 	case *emulatorv1.Request_ListUnits:
 		units := make([]*emulatorv1.Unit, 0, len(s.units))
+		values := b.ListUnits.GetIncludeValues()
 		for _, u := range s.units {
-			units = append(units, proto.Clone(u.spec).(*emulatorv1.Unit))
+			units = append(units, listedUnit(u.spec, values))
 		}
 		return &emulatorv1.Response{Body: &emulatorv1.Response_ListUnits{ListUnits: &emulatorv1.ListUnitsResponse{Units: units}}}
 
@@ -268,4 +269,19 @@ func (s *Server) screen(index int) *emulatorv1.Image {
 
 func errResp(e *emulatorv1.Error) *emulatorv1.Response {
 	return &emulatorv1.Response{Body: &emulatorv1.Response_Error{Error: e}}
+}
+
+// listedUnit copies spec for ListUnits, eliding a value unless values.
+func listedUnit(spec *emulatorv1.Unit, values bool) *emulatorv1.Unit {
+	if values || spec.GetStore() != nil {
+		return proto.Clone(spec).(*emulatorv1.Unit)
+	}
+	u := &emulatorv1.Unit{}
+	for fd, v := range spec.ProtoReflect().Range {
+		if fd.Name() != "value" {
+			u.ProtoReflect().Set(fd, v)
+		}
+	}
+	u.Source = &emulatorv1.Unit_Value{Value: []byte{}}
+	return u
 }

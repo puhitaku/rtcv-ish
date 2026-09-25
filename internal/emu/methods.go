@@ -193,8 +193,21 @@ func (c *Client) ClearUnits(ctx context.Context) error {
 	return err
 }
 
+// ListUnits lists the scheduled units with value units' values elided:
+// their value is empty and their size set. Store units are complete.
 func (c *Client) ListUnits(ctx context.Context) ([]*emulatorv1.Unit, error) {
-	resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_ListUnits{ListUnits: &emulatorv1.ListUnitsRequest{}}})
+	return c.listUnits(ctx, false)
+}
+
+// ListUnitsFull lists the scheduled units including values. The response
+// can exceed the message size limit when large value units are scheduled.
+func (c *Client) ListUnitsFull(ctx context.Context) ([]*emulatorv1.Unit, error) {
+	return c.listUnits(ctx, true)
+}
+
+func (c *Client) listUnits(ctx context.Context, values bool) ([]*emulatorv1.Unit, error) {
+	req := &emulatorv1.ListUnitsRequest{IncludeValues: values}
+	resp, err := c.call(ctx, &emulatorv1.Request{Body: &emulatorv1.Request_ListUnits{ListUnits: req}})
 	if err != nil {
 		return nil, err
 	}

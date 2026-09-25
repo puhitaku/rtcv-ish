@@ -72,7 +72,7 @@ dependencies inside the emulator build.
 | `ApplyUnits` | Schedule units. Ids must be unique among live units. The whole batch is validated before any unit is scheduled. | `NO_ROM`, `NOT_FOUND`, `OUT_OF_RANGE`, `INVALID_ARGUMENT` |
 | `RemoveUnits` | Remove units by id. Unknown ids are ignored. | |
 | `ClearUnits` | Remove all units. | |
-| `ListUnits` | Units that are queued or executing. | |
+| `ListUnits` | Units that are queued or executing. Value units carry an empty `value` (with `size` set) unless `include_values` is set; large values can otherwise exceed the message size limit. | |
 | `SetInput` | Override input (OR-ed with the user's) until `clear`. | `UNSUPPORTED` |
 | `Screenshot` | RGBA images of all screens. | `NO_ROM`, `UNSUPPORTED` |
 | `Subscribe` | Frame events every N frames (0 disables). | |

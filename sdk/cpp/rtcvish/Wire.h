@@ -74,7 +74,8 @@ void setError(Response& resp, ErrorCode code, const std::string& message);
 void toPb(const Status& in, rtcvish_emulator_v1_Status& out);
 void toPb(const Domain& in, rtcvish_emulator_v1_Domain& out);
 void toPb(const Capabilities& in, rtcvish_emulator_v1_Capabilities& out);
-void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out);
+// With includeValue false, a value unit is encoded with an empty value.
+void toPb(const Unit& in, rtcvish_emulator_v1_Unit& out, bool includeValue = true);
 Unit fromPb(const rtcvish_emulator_v1_Unit& in);
 
 } // namespace wire
