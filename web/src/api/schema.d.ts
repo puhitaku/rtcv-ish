@@ -389,7 +389,25 @@ export interface paths {
         get: operations["listUnits"];
         put?: never;
         post?: never;
+        /** @description Remove every scheduled unit. */
         delete: operations["clearUnits"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blast/units/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Remove one scheduled unit (e.g. unfreeze one address). 404 `NOT_FOUND` when no unit with this id is scheduled (it expired or was cleared). */
+        delete: operations["removeUnit"];
         options?: never;
         head?: never;
         patch?: never;
@@ -964,6 +982,7 @@ export interface paths {
          *     | `frame` | `FrameEvent`, at most 10 per second |
          *     | `blast` | `BlastEvent`, after every generated layer has been applied (manual, auto-corrupt, GH corrupt) |
          *     | `stash`, `stockpile`, `savestates`, `settings`, `domains`, `lists` | `ChangedEvent` (`{}`): refetch |
+         *     | `units` | `UnitsEvent`, whenever the core changes the scheduled unit set: apply (blast, auto-corrupt, apply, toggle, stash run/inject/merge/reroll, GH corrupt), max-infinite eviction, `DELETE /blast/units[/{id}]`, savestate loads (slots, stash original/run, protection back/last: units are cleared on load, like RTCV), reset, ROM load/close, connect and disconnect. Refetch `GET /blast/units`. One operation may send several. Units expiring in the emulator send nothing. |
          *     | `log` | `LogEvent` |
          */
         get: operations["streamEvents"];
@@ -1038,6 +1057,10 @@ export interface components {
             reset: boolean;
             /** Format: int64 */
             maxPayload: number;
+            /** @description The emulator implements `scanline` units. */
+            scanlineUnits: boolean;
+            /** @description The emulator implements `hard` units. */
+            hardUnits: boolean;
         };
         /** @enum {string} */
         GameState: "noRom" | "running" | "paused";
@@ -1231,7 +1254,8 @@ export interface components {
         /**
          * @description Defaults: nightmare, intensity 1, errorDelay 1, spread, precision 1,
          *     alignment 0, autoCorrupt false, maxInfiniteUnits 50, lockUnits
-         *     false; engine parameters as in RTCV (full min/max ranges).
+         *     false, freezeMode hard; engine parameters as in RTCV (full min/max
+         *     ranges).
          */
         Settings: {
             engine: components["schemas"]["Engine"];
@@ -1249,6 +1273,7 @@ export interface components {
             autoCorrupt: boolean;
             maxInfiniteUnits: number;
             lockUnits: boolean;
+            freezeMode: components["schemas"]["FreezeMode"];
             nightmare: components["schemas"]["NightmareSettings"];
             hellgenie: components["schemas"]["HellgenieSettings"];
             distortion: components["schemas"]["DistortionSettings"];
@@ -1258,6 +1283,16 @@ export interface components {
             reroll: components["schemas"]["RerollSettings"];
             gameProtection: components["schemas"]["GameProtectionSettings"];
         };
+        /**
+         * @description How infinite units (lifetime 0) are enforced (emulator API
+         *     `Unit.mode`): `frame` writes once per frame (RTCV), `scanline` also
+         *     at every scanline, `hard` also intercepts CPU/DMA writes. `hard`
+         *     applies to value units only; store units get `scanline` at most.
+         *     When the emulator lacks the mode (`Capabilities.hardUnits`,
+         *     `scanlineUnits`) the core falls back to `scanline`, then `frame`.
+         * @enum {string}
+         */
+        FreezeMode: "frame" | "scanline" | "hard";
         PrecisionRangesPatch: {
             1?: components["schemas"]["ValueRange"];
             2?: components["schemas"]["ValueRange"];
@@ -1329,6 +1364,7 @@ export interface components {
             autoCorrupt?: boolean;
             maxInfiniteUnits?: number;
             lockUnits?: boolean;
+            freezeMode?: components["schemas"]["FreezeMode"];
             nightmare?: components["schemas"]["NightmareSettingsPatch"];
             hellgenie?: components["schemas"]["HellgenieSettingsPatch"];
             distortion?: components["schemas"]["DistortionSettingsPatch"];
@@ -1412,6 +1448,8 @@ export interface components {
             loop: boolean;
             /** Format: int64 */
             loopDelay: number;
+            /** @description How the emulator enforces the write. */
+            mode: components["schemas"]["FreezeMode"];
         };
         GameInfo: {
             title: string;
@@ -1480,7 +1518,7 @@ export interface components {
             name?: string;
         };
         /** @enum {string} */
-        EventType: "status" | "frame" | "blast" | "stash" | "stockpile" | "savestates" | "settings" | "domains" | "lists" | "log";
+        EventType: "status" | "frame" | "blast" | "stash" | "stockpile" | "savestates" | "settings" | "domains" | "lists" | "units" | "log";
         FrameEvent: {
             /** Format: int64 */
             frame: number;
@@ -1491,6 +1529,13 @@ export interface components {
             engine: components["schemas"]["Engine"];
             /** Format: double */
             elapsedMs: number;
+        };
+        /** @enum {string} */
+        UnitsReason: "apply" | "remove" | "clear" | "load" | "reset" | "game" | "connect" | "disconnect";
+        UnitsEvent: {
+            reason: components["schemas"]["UnitsReason"];
+            /** @description Units removed by a savestate load (`load`) or reset (`reset`); 0 otherwise. */
+            cleared: number;
         };
         /** @description Empty object: refetch the resource named by the event type. */
         ChangedEvent: Record<string, never>;
@@ -2076,6 +2121,27 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
             204: {
                 headers: {
                     [name: string]: unknown;

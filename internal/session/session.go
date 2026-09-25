@@ -319,6 +319,9 @@ type Capabilities struct {
 	LoadRom    bool  `json:"loadRom"`
 	Reset      bool  `json:"reset"`
 	MaxPayload int64 `json:"maxPayload"`
+	// Unit modes beyond frame the emulator implements.
+	ScanlineUnits bool `json:"scanlineUnits"`
+	HardUnits     bool `json:"hardUnits"`
 }
 
 type GameStatus struct {
@@ -356,12 +359,14 @@ func infoFromHello(h *emulatorv1.HelloResponse) EmulatorInfo {
 		System:          h.GetSystem(),
 		ProtocolVersion: int(h.GetProtocolVersion()),
 		Capabilities: Capabilities{
-			Savestates: c.GetSavestates(),
-			Screenshot: c.GetScreenshot(),
-			Input:      c.GetInput(),
-			LoadRom:    c.GetLoadRom(),
-			Reset:      c.GetReset_(),
-			MaxPayload: int64(c.GetMaxPayload()),
+			Savestates:    c.GetSavestates(),
+			Screenshot:    c.GetScreenshot(),
+			Input:         c.GetInput(),
+			LoadRom:       c.GetLoadRom(),
+			Reset:         c.GetReset_(),
+			MaxPayload:    int64(c.GetMaxPayload()),
+			ScanlineUnits: c.GetScanlineUnits(),
+			HardUnits:     c.GetHardUnits(),
 		},
 	}
 }

@@ -39,6 +39,8 @@ type conn struct {
 	// Guarded by Session.mu.
 	unresponsive   bool
 	refreshPending bool
+	// modeFallbackLogged is set once the freeze mode fallback was logged.
+	modeFallbackLogged bool
 }
 
 type process struct {
@@ -154,7 +156,7 @@ func (s *Session) setupConn(ctx context.Context, c *emu.Client, addr string, pro
 	}
 	s.conn = cn
 	s.nextUnitID = 0
-	s.resetGameStateLocked()
+	s.resetGameStateLocked(UnitsConnect)
 	s.reloadGameLocked(game, ds)
 	s.wg.Add(2)
 	go s.eventLoop(cn)
@@ -174,13 +176,16 @@ func (s *Session) dropConnLocked() {
 	s.conn.client.Close()
 	s.conn = nil
 	s.game = GameStatus{State: StateNoRom}
-	s.resetGameStateLocked()
+	s.resetGameStateLocked(UnitsDisconnect)
 	s.setDomainsLocked(nil)
 }
 
-// resetGameStateLocked forgets everything tied to the running game.
-func (s *Session) resetGameStateLocked() {
+// resetGameStateLocked forgets everything tied to the running game. The
+// emulator has no units left (or is gone); reason goes into the units
+// event.
+func (s *Session) resetGameStateLocked(reason string) {
 	s.infinite = nil
+	s.unitsChanged(reason, 0)
 	s.blLayer, s.blBackup, s.blOn = nil, nil, false
 	s.store.ClearBackups()
 }
@@ -597,7 +602,7 @@ func (s *Session) refreshGame(ctx context.Context, cn *conn, force bool) (reload
 		return true, errDisconnected
 	}
 	if !force {
-		s.resetGameStateLocked()
+		s.resetGameStateLocked(UnitsGame)
 	}
 	if err != nil {
 		s.game = g
@@ -683,7 +688,7 @@ func (s *Session) loadRom(ctx context.Context, path string) (GameStatus, error) 
 	if err := cn.client.ClearUnits(ctx); err != nil {
 		return GameStatus{}, err
 	}
-	if err := s.commit(cn, s.resetGameStateLocked); err != nil {
+	if err := s.commit(cn, func() { s.resetGameStateLocked(UnitsGame) }); err != nil {
 		return GameStatus{}, err
 	}
 	_, err = s.refreshGame(ctx, cn, true)
@@ -731,6 +736,10 @@ func (s *Session) Resume(ctx context.Context) (GameStatus, error) {
 
 func (s *Session) Reset(ctx context.Context) (GameStatus, error) {
 	return s.control(ctx, "reset", func(ctx context.Context, cn *conn) error {
+		n, err := s.countUnits(ctx, cn)
+		if err != nil {
+			return err
+		}
 		if err := cn.client.Reset(ctx); err != nil {
 			return err
 		}
@@ -738,6 +747,7 @@ func (s *Session) Reset(ctx context.Context) (GameStatus, error) {
 			s.infinite = nil
 			// The frame counter restarts at 0.
 			s.lastAutoFrame = 0
+			s.unitsChanged(UnitsReset, n)
 		})
 	})
 }

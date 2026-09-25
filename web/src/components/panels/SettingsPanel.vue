@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
 import NumField from '@/components/ui/NumField.vue'
+import FreezeModeSelect from '@/components/engine/FreezeModeSelect.vue'
 import { SHORTCUTS } from '@/lib/shortcuts'
 import { useSettingsPatch } from '@/components/engine/useSettingsPatch'
 import { useListsStore } from '@/stores/lists'
@@ -78,6 +79,7 @@ function chk(e: Event) {
           />
           Lock units
         </label>
+        <FreezeModeSelect testid="settings-freeze-mode" />
       </template>
     </BoxPanel>
 

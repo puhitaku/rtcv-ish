@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/emu/fake"
 )
@@ -131,7 +132,7 @@ func TestEmuMemory(t *testing.T) {
 	}
 
 	l := &Layer{Units: []*Unit{newStoreUnit(StoreOnce, StoreImmediate, "MainRAM", 0x10, "VRAM", 0x100, 3, false, 0, 1)}}
-	units, err := Rasterize(t.Context(), l, mem, func() uint64 { return 1 })
+	units, err := Rasterize(t.Context(), l, mem, emulatorv1.Mode_FRAME, func() uint64 { return 1 })
 	if err != nil {
 		t.Fatal(err)
 	}

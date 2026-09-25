@@ -15,6 +15,7 @@ const (
 	EventSettings   = "settings"
 	EventDomains    = "domains"
 	EventLists      = "lists"
+	EventUnits      = "units"
 	EventLog        = "log"
 )
 
@@ -32,6 +33,25 @@ type BlastEvent struct {
 	Count     int     `json:"count"`
 	Engine    string  `json:"engine"`
 	ElapsedMs float64 `json:"elapsedMs"`
+}
+
+// Reasons of a units event.
+const (
+	UnitsApply      = "apply"
+	UnitsRemove     = "remove"
+	UnitsClear      = "clear"
+	UnitsLoad       = "load"
+	UnitsReset      = "reset"
+	UnitsGame       = "game"
+	UnitsConnect    = "connect"
+	UnitsDisconnect = "disconnect"
+)
+
+// UnitsEvent says the set of scheduled units changed. Cleared is the
+// number of units a savestate load or reset removed.
+type UnitsEvent struct {
+	Reason  string `json:"reason"`
+	Cleared int    `json:"cleared"`
 }
 
 type LogEvent struct {
@@ -97,6 +117,10 @@ func (s *Session) Subscribe() (<-chan Event, func()) { return s.broker.subscribe
 
 func (s *Session) changed(typ string) {
 	s.broker.publish(Event{Type: typ, Data: struct{}{}})
+}
+
+func (s *Session) unitsChanged(reason string, cleared int) {
+	s.broker.publish(Event{Type: EventUnits, Data: UnitsEvent{Reason: reason, Cleared: cleared}})
 }
 
 // notify sends a user-facing log message.

@@ -60,15 +60,22 @@ Three columns like RTCV's Engine Config grid:
    alignment number, and an engine-specific parameter block:
    - Nightmare: algo (Random / Random Tilt / Tilt), min/max for the
      current precision.
-   - Hellgenie: min/max, Max ∞ Units, Clear all cheats.
+   - Hellgenie: min/max, Max ∞ Units, Infinite units mode, Clear all
+     cheats.
    - Distortion: delay, Resync (clear units).
-   - Freeze: Max ∞ Units, Clear all freezes.
-   - Pipe: Max ∞ Units, Clear pipes, Lock step units.
+   - Freeze: Max ∞ Units, Infinite units mode, Clear all freezes.
+   - Pipe: Max ∞ Units, Infinite units mode, Clear pipes, Lock step
+     units.
    - Vector: limiter list, value list, Unlock precision.
    - Cluster: limiter list, chunk size, method, rotate amount, direction,
      split units, filter all.
    - Custom: the full Custom Engine form inline (unit source, value
-     settings, store settings, tilt, delay, lifetime, loop, limiter).
+     settings, store settings, tilt, delay, lifetime, loop, limiter),
+     Max ∞ Units, Infinite units mode.
+
+   "Infinite units" is the `freezeMode` setting: per frame / per scanline
+   / hard. Modes the emulator lacks read "(unsupported)" and a note says
+   which mode the core falls back to.
 3. Memory domains: multi-select list with size and word size, buttons
    Auto-select / Select all / Unselect all. Hidden domains are shown
    greyed with a "(hidden)" tag but selectable.
@@ -102,8 +109,20 @@ Load/Save `.bl`. Layer size label.
 ### Memory / Hex
 
 Domain select, address input, a hex view (16 bytes per row, 1/2/4-byte
-grouping), editing by typing, Freeze/Unfreeze (adds or removes an
-infinite value unit at the address), Refresh, and a screenshot box.
+grouping), editing by typing, Freeze/Unfreeze, Refresh, and a screenshot
+box.
+
+Frozen cells are derived from the server's scheduled units
+(`GET /api/blast/units`: infinite value units), never from a client-side
+list, so they show what the emulator actually holds. The pane refetches
+the units on every `units` event and on a `status` event that changes the
+game; a savestate load or reset therefore shows its freezes as gone at
+once, and the log strip says "N scheduled units cleared by savestate
+load" (or "by reset"). Freeze applies an infinite value unit with the
+current bytes; the core gives it the `freezeMode` setting (default hard,
+with the emulator's fallback), which the Freeze button tooltip shows.
+Frozen cells have the tooltip "frozen (<mode>)". Unfreeze removes only the
+units covering the cursor (`DELETE /api/blast/units/{id}`).
 
 Below them, a Bitmaps box with one pane per memory domain (all domains,
 hidden ones included), stacked vertically at the full panel width. The
@@ -139,14 +158,17 @@ hidden or no ROM is loaded, and the timer stops when the panel is left.
 
 ### Settings
 
-Reroll settings, StepActions settings (max infinite units, lock units),
+Reroll settings, StepActions settings (max infinite units, lock units,
+infinite units: per frame / per scanline / hard),
 game protection interval, lists manager (upload/delete `.txt`), data
 directory, log level, About.
 
 ## Behaviour
 
 - One Pinia store per resource (`status`, `settings`, `domains`, `stash`,
-  `stockpile`, `savestates`, `lists`); the SSE stream triggers refetches.
+  `stockpile`, `savestates`, `lists`, `units`); the SSE stream triggers
+  refetches. Units are refetched only while a view that shows them is
+  open, and a burst of `units` events costs at most two fetches.
 - Buttons are disabled (with a tooltip reason) when the emulator is
   disconnected, no ROM is loaded, or it is busy or unresponsive
   (`needEmu` / `needRom` in the status store include both).

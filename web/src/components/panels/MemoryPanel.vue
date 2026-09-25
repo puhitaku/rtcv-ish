@@ -8,6 +8,7 @@ import { act } from '@/stores/log'
 import { ROW, useMemoryStore } from '@/stores/memory'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
+import { useUnitsStore } from '@/stores/units'
 
 const VIEW = 256
 const AUTO_MS = 500
@@ -15,6 +16,7 @@ const mem = useMemoryStore()
 const domains = useDomainsStore()
 const st = useStatusStore()
 const ui = useUiStore()
+const units = useUnitsStore()
 
 const group = ref<Group>(1)
 const addrText = ref(hex(mem.address))
@@ -141,16 +143,30 @@ const cursorFrozen = computed(() =>
   cursorCell.value ? mem.frozenAt(mem.domain, mem.address + cursorCell.value.offset) : undefined,
 )
 
+const freezeTitle = computed(() => {
+  if (st.needRom) return st.needRom
+  if (!cursorCell.value) return 'Select a cell'
+  const f = cursorFrozen.value
+  if (f) return `Frozen (${f.mode}, unit #${f.id}). Unfreeze removes only this freeze.`
+  return `Freeze the value at the cursor (${mem.freezeMode})`
+})
+
 async function toggleFreeze() {
   const c = cursorCell.value
   if (!c) return
   const addr = mem.address + c.offset
   if (cursorFrozen.value) await act(() => mem.unfreeze(addr), `unfrozen ${hex(addr)}`)
-  else await act(() => mem.freeze(addr, c.size), `frozen ${hex(addr)} (${c.size} bytes)`)
+  else
+    await act(
+      () => mem.freeze(addr, c.size),
+      `frozen ${hex(addr)} (${c.size} bytes, ${mem.freezeMode})`,
+    )
 }
 
-function isFrozen(offset: number) {
-  return !!mem.frozenAt(mem.domain, mem.address + offset)
+/** "frozen (hard)" for a frozen cell, else undefined. */
+function frozenTitle(offset: number) {
+  const f = mem.frozenAt(mem.domain, mem.address + offset)
+  return f ? `frozen (${f.mode})` : undefined
 }
 
 const bitmaps = ref<InstanceType<typeof MemoryBitmap>[]>([])
@@ -174,11 +190,18 @@ watch(auto, (on) => {
   clearInterval(timer)
   if (on) timer = setInterval(() => void refreshAll(), AUTO_MS)
 })
+// Frozen cells follow the server's scheduled units, refetched on `units`
+// events and game changes while the panel is shown.
+const stopUnits = units.watch()
 onMounted(() => {
   consumeTarget()
   void refresh()
+  if (st.connected) void units.refresh().catch(() => {})
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  clearInterval(timer)
+  stopUnits()
+})
 
 const shotUrl = computed(() => `/api/emulator/screenshot?t=${shot.value}`)
 function refreshShot() {
@@ -227,14 +250,7 @@ function refreshShot() {
           class="btn"
           :class="{ 'btn-on': !!cursorFrozen }"
           :disabled="!cursorCell || !!st.needRom"
-          :title="
-            st.needRom ||
-            (!cursorCell
-              ? 'Select a cell'
-              : cursorFrozen
-                ? 'Unfreeze (clears scheduled units and re-applies other freezes)'
-                : 'Freeze the value at the cursor')
-          "
+          :title="freezeTitle"
           data-testid="mem-freeze"
           @click="toggleFreeze"
         >
@@ -259,8 +275,9 @@ function refreshShot() {
               class="cursor-pointer px-0.5"
               :class="{
                 'bg-accent text-accent-fg': cursorCell?.offset === c.offset,
-                'text-warn': isFrozen(c.offset) && cursorCell?.offset !== c.offset,
+                'text-warn': !!frozenTitle(c.offset) && cursorCell?.offset !== c.offset,
               }"
+              :title="frozenTitle(c.offset)"
               :data-testid="`hex-cell-${c.offset}`"
               @click="select(c.offset)"
               >{{
@@ -272,7 +289,8 @@ function refreshShot() {
         </div>
       </div>
       <div class="text-[11px] text-dim">
-        Click a cell and type hex digits to write. Arrows move. Frozen cells are highlighted.
+        Click a cell and type hex digits to write. Arrows move. Frozen cells (scheduled infinite
+        value units) are highlighted.
       </div>
     </BoxPanel>
 

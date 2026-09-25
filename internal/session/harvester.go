@@ -74,13 +74,24 @@ func (s *Session) saveState(ctx context.Context, cn *conn) (*stockpile.StashKey,
 	return k, nil
 }
 
-// loadState clears the scheduled units and loads a savestate blob.
+// loadState clears the scheduled units, like RTCV, and loads a savestate
+// blob.
 func (s *Session) loadState(ctx context.Context, cn *conn, parentKey string) error {
 	data, err := s.store.ReadState(parentKey)
 	if err != nil {
 		return classify(err)
 	}
-	if err := s.clearUnits(ctx, cn); err != nil {
+	n, err := s.countUnits(ctx, cn)
+	if err != nil {
+		return err
+	}
+	if err := cn.client.ClearUnits(ctx); err != nil {
+		return err
+	}
+	if err := s.commit(cn, func() {
+		s.infinite = nil
+		s.unitsChanged(UnitsLoad, n)
+	}); err != nil {
 		return err
 	}
 	return cn.client.LoadState(ctx, data)
@@ -230,13 +241,12 @@ func (s *Session) Corrupt(ctx context.Context, slot int, loadBefore bool) (*stoc
 		}); err != nil {
 			return err
 		}
-		if err := s.clearUnits(ctx, cn); err != nil {
-			return err
-		}
 		if loadBefore {
 			if err := s.loadState(ctx, cn, sk.ParentKey); err != nil {
 				return err
 			}
+		} else if err := s.clearUnits(ctx, cn); err != nil {
+			return err
 		}
 		g, err := s.generate(ctx, cn)
 		if err != nil {

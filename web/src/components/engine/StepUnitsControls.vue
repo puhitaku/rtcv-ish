@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import NumField from '@/components/ui/NumField.vue'
+import FreezeModeSelect from './FreezeModeSelect.vue'
 import { act } from '@/stores/log'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
 import { useUnitsStore } from '@/stores/units'
 import { useSettingsPatch } from './useSettingsPatch'
 
-/** Max ∞ Units / Lock units / Clear units, shared by several engines. */
+/** Max ∞ Units / Infinite units mode / Lock units / Clear units, shared by several engines. */
 defineProps<{ clearLabel: string; lock?: boolean }>()
 const settings = useSettingsStore()
 const st = useStatusStore()
@@ -25,6 +26,7 @@ const patch = useSettingsPatch()
         @update:model-value="patch({ maxInfiniteUnits: $event })"
       />
     </label>
+    <FreezeModeSelect testid="freeze-mode" />
     <label v-if="lock" class="flex items-center gap-2">
       <input
         type="checkbox"

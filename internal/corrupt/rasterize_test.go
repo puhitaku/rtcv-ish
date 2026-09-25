@@ -2,6 +2,7 @@ package corrupt
 
 import (
 	"math/big"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -76,7 +77,7 @@ func TestRasterize(t *testing.T) {
 		{"loop timing zero", zeroLoop, zeroLoopWant},
 	}
 	for _, tt := range tests {
-		got, err := Rasterize(t.Context(), &Layer{Units: []*Unit{tt.unit}}, mem, func() uint64 { return 1 })
+		got, err := Rasterize(t.Context(), &Layer{Units: []*Unit{tt.unit}}, mem, emulatorv1.Mode_FRAME, func() uint64 { return 1 })
 		if err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
@@ -101,7 +102,7 @@ func TestRasterizeSkipsAndIDs(t *testing.T) {
 		newValueUnit("A", 1, []byte{2}, false, 1),
 	}}
 	id := uint64(100)
-	got, err := Rasterize(t.Context(), l, mem, func() uint64 { id++; return id })
+	got, err := Rasterize(t.Context(), l, mem, emulatorv1.Mode_FRAME, func() uint64 { id++; return id })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,85 @@ func TestRasterizeSkipsAndIDs(t *testing.T) {
 		t.Errorf("ReadMany calls = %d", len(mem.calls))
 	}
 	bad := &Layer{Units: []*Unit{{Enabled: true, Domain: "A", Precision: 2, Source: SourceValue, Value: Hex{1}}}}
-	if _, err := Rasterize(t.Context(), bad, mem, func() uint64 { return 1 }); err == nil {
+	if _, err := Rasterize(t.Context(), bad, mem, emulatorv1.Mode_FRAME, func() uint64 { return 1 }); err == nil {
 		t.Error("invalid unit accepted")
+	}
+}
+
+func TestRasterizeModes(t *testing.T) {
+	mem := newFakeMem(dom("A", 64))
+	l := &Layer{Units: []*Unit{
+		newValueUnit("A", 0, []byte{1}, false, 0),
+		newValueUnit("A", 1, []byte{1}, false, 5),
+		newStoreUnit(StoreContinuous, StorePreExecute, "A", 2, "A", 8, 1, false, 0, 0),
+		newStoreUnit(StoreOnce, StorePreExecute, "A", 3, "A", 8, 1, false, 0, 3),
+		// Sampled now and sent as a value unit, so HARD applies.
+		newStoreUnit(StoreOnce, StoreImmediate, "A", 4, "A", 8, 1, false, 0, 0),
+	}}
+	F, S, H := emulatorv1.Mode_FRAME, emulatorv1.Mode_SCANLINE, emulatorv1.Mode_HARD
+	tests := []struct {
+		infinite emulatorv1.Mode
+		want     []emulatorv1.Mode
+	}{
+		{F, []emulatorv1.Mode{F, F, F, F, F}},
+		{S, []emulatorv1.Mode{S, F, S, F, S}},
+		{H, []emulatorv1.Mode{H, F, S, F, H}},
+	}
+	for _, tt := range tests {
+		got, err := Rasterize(t.Context(), l, mem, tt.infinite, func() uint64 { return 1 })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var modes []emulatorv1.Mode
+		for _, u := range got {
+			modes = append(modes, u.GetMode())
+		}
+		if !slices.Equal(modes, tt.want) {
+			t.Errorf("infinite %v: modes %v, want %v", tt.infinite, modes, tt.want)
+		}
+	}
+}
+
+func TestInfiniteMode(t *testing.T) {
+	F, S, H := emulatorv1.Mode_FRAME, emulatorv1.Mode_SCANLINE, emulatorv1.Mode_HARD
+	tests := []struct {
+		want           FreezeMode
+		scanline, hard bool
+		mode           emulatorv1.Mode
+		fellBack       bool
+	}{
+		{FreezeHard, true, true, H, false},
+		{FreezeHard, true, false, S, true},
+		{FreezeHard, false, false, F, true},
+		// An emulator may implement HARD without SCANLINE.
+		{FreezeHard, false, true, H, false},
+		{FreezeScanline, true, true, S, false},
+		{FreezeScanline, false, true, F, true},
+		{FreezeFrame, false, false, F, false},
+		{FreezeFrame, true, true, F, false},
+	}
+	for _, tt := range tests {
+		mode, fellBack := InfiniteMode(tt.want, tt.scanline, tt.hard)
+		if mode != tt.mode || fellBack != tt.fellBack {
+			t.Errorf("InfiniteMode(%s, scanline=%v, hard=%v) = %v, %v; want %v, %v",
+				tt.want, tt.scanline, tt.hard, mode, fellBack, tt.mode, tt.fellBack)
+		}
+	}
+}
+
+func TestFreezeModeSetting(t *testing.T) {
+	if m := DefaultSettings().FreezeMode; m != FreezeHard {
+		t.Errorf("default freezeMode %q", m)
+	}
+	st := DefaultSettings()
+	st.FreezeMode = "sometimes"
+	if err := st.Validate(); err == nil {
+		t.Error("invalid freezeMode accepted")
+	}
+	for _, m := range []FreezeMode{FreezeFrame, FreezeScanline, FreezeHard} {
+		st.FreezeMode = m
+		if err := st.Validate(); err != nil {
+			t.Errorf("%s: %v", m, err)
+		}
 	}
 }

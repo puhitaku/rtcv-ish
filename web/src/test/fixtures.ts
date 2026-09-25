@@ -18,6 +18,7 @@ export function settingsFixture(): Settings {
     autoCorrupt: false,
     maxInfiniteUnits: 50,
     lockUnits: false,
+    freezeMode: 'hard',
     nightmare: { algo: 'random', ranges: structuredClone(full) },
     hellgenie: { ranges: structuredClone(full) },
     distortion: { delay: 50 },
@@ -77,6 +78,8 @@ export function statusFixture(over: Partial<Status> = {}): Status {
         loadRom: true,
         reset: true,
         maxPayload: 1 << 20,
+        scanlineUnits: true,
+        hardUnits: true,
       },
     },
     game: {

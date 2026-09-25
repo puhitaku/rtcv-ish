@@ -242,6 +242,16 @@ func (a *api) ClearUnits(ctx context.Context, _ gen.ClearUnitsRequestObject) (ge
 	return gen.ClearUnits204Response{}, nil
 }
 
+func (a *api) RemoveUnit(ctx context.Context, r gen.RemoveUnitRequestObject) (gen.RemoveUnitResponseObject, error) {
+	if r.Id < 0 {
+		return nil, newError(http.StatusBadRequest, CodeInvalidArgument, "id must be >= 0")
+	}
+	if err := a.s.sess.RemoveUnit(ctx, uint64(r.Id)); err != nil {
+		return nil, err
+	}
+	return gen.RemoveUnit204Response{}, nil
+}
+
 func (a *api) ToggleLayer(ctx context.Context, r gen.ToggleLayerRequestObject) (gen.ToggleLayerResponseObject, error) {
 	if err := a.s.sess.Toggle(ctx, r.Body.On); err != nil {
 		return nil, err

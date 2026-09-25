@@ -114,7 +114,18 @@ func (s *Session) apply(ctx context.Context, cn *conn, l *corrupt.Layer, backup,
 	}
 	pd := s.protoDomains
 	lockUnits, maxInfinite := s.settings.LockUnits, s.settings.MaxInfiniteUnits
+	want := s.settings.FreezeMode
+	caps := cn.info.Capabilities
+	mode, fellBack := corrupt.InfiniteMode(want, caps.ScanlineUnits, caps.HardUnits)
+	logFallback := fellBack && !cn.modeFallbackLogged
+	if logFallback {
+		cn.modeFallbackLogged = true
+	}
 	s.mu.Unlock()
+	if logFallback {
+		s.log.Info("the emulator lacks the freeze mode; infinite units fall back",
+			"freezeMode", want, "using", corrupt.ModeName(mode), "emulator", cn.info.Name)
+	}
 	mem := corrupt.EmuMemory(cn.client, pd)
 	var bk *corrupt.Layer
 	var err error
@@ -123,12 +134,15 @@ func (s *Session) apply(ctx context.Context, cn *conn, l *corrupt.Layer, backup,
 			return invalid(err)
 		}
 	}
-	units, err := corrupt.Rasterize(ctx, l, mem, s.nextID)
+	units, err := corrupt.Rasterize(ctx, l, mem, mode, s.nextID)
 	if err != nil {
 		return invalid(err)
 	}
 	if err := s.schedule(ctx, cn, units); err != nil {
 		return err
+	}
+	if len(units) > 0 {
+		s.unitsChanged(UnitsApply, 0)
 	}
 	if followMax && !lockUnits {
 		var drop []uint64
@@ -144,6 +158,7 @@ func (s *Session) apply(ctx context.Context, cn *conn, l *corrupt.Layer, backup,
 			s.mu.Lock()
 			s.infinite = slices.DeleteFunc(s.infinite, func(id uint64) bool { return slices.Contains(drop, id) })
 			s.mu.Unlock()
+			s.unitsChanged(UnitsRemove, 0)
 		}
 	}
 	if backup {
@@ -175,7 +190,16 @@ func (s *Session) clearUnits(ctx context.Context, cn *conn) error {
 	if err := cn.client.ClearUnits(ctx); err != nil {
 		return err
 	}
-	return s.commit(cn, func() { s.infinite = nil })
+	return s.commit(cn, func() {
+		s.infinite = nil
+		s.unitsChanged(UnitsClear, 0)
+	})
+}
+
+// countUnits returns the number of units scheduled in the emulator.
+func (s *Session) countUnits(ctx context.Context, cn *conn) (int, error) {
+	us, err := cn.client.ListUnits(ctx)
+	return len(us), err
 }
 
 // ApplyLayer schedules a layer on the running game. Units must target
@@ -242,6 +266,8 @@ type EmuUnit struct {
 	Lifetime  uint32       `json:"lifetime"`
 	Loop      bool         `json:"loop"`
 	LoopDelay uint32       `json:"loopDelay"`
+	// Mode is frame, scanline or hard (corrupt.FreezeMode values).
+	Mode corrupt.FreezeMode `json:"mode"`
 }
 
 type StoreSource struct {
@@ -266,6 +292,7 @@ func (s *Session) Units(ctx context.Context) ([]EmuUnit, error) {
 		eu := EmuUnit{
 			ID: u.GetId(), Domain: u.GetDomain(), Address: u.GetAddress(), Size: u.GetSize(),
 			Tilt: u.GetTilt(), Delay: u.GetDelay(), Lifetime: u.GetLifetime(), Loop: u.GetLoop(), LoopDelay: u.GetLoopDelay(),
+			Mode: corrupt.ModeName(u.GetMode()),
 		}
 		if st := u.GetStore(); st != nil {
 			eu.Store = &StoreSource{Domain: st.GetDomain(), Address: st.GetAddress(), Continuous: st.GetContinuous()}
@@ -284,6 +311,31 @@ func (s *Session) ClearUnits(ctx context.Context) error {
 			return err
 		}
 		return s.clearUnits(ctx, cn)
+	})
+}
+
+// RemoveUnit removes one scheduled unit. Removing an unknown or expired
+// id is KindNotFound.
+func (s *Session) RemoveUnit(ctx context.Context, id uint64) error {
+	return s.withOp(ctx, "removeUnit", func(ctx context.Context) error {
+		cn, err := s.current()
+		if err != nil {
+			return err
+		}
+		us, err := cn.client.ListUnits(ctx)
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(us, func(u *emulatorv1.Unit) bool { return u.GetId() == id }) {
+			return errorf(KindNotFound, "no scheduled unit %d", id)
+		}
+		if err := cn.client.RemoveUnits(ctx, []uint64{id}); err != nil {
+			return err
+		}
+		return s.commit(cn, func() {
+			s.infinite = slices.DeleteFunc(s.infinite, func(x uint64) bool { return x == id })
+			s.unitsChanged(UnitsRemove, 0)
+		})
 	})
 }
 

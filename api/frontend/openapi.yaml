@@ -430,8 +430,23 @@ paths:
     delete:
       operationId: clearUnits
       tags: [blast]
+      description: Remove every scheduled unit.
       responses:
         "204": { description: Cleared. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /blast/units/{id}:
+    delete:
+      operationId: removeUnit
+      tags: [blast]
+      description: Remove one scheduled unit (e.g. unfreeze one address). 404 `NOT_FOUND` when no unit with this id is scheduled (it expired or was cleared).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 0 }
+      responses:
+        "204": { description: Removed. }
         default: { $ref: "#/components/responses/Error" }
 
   /blast/toggle:
@@ -1015,6 +1030,7 @@ paths:
         | `frame` | `FrameEvent`, at most 10 per second |
         | `blast` | `BlastEvent`, after every generated layer has been applied (manual, auto-corrupt, GH corrupt) |
         | `stash`, `stockpile`, `savestates`, `settings`, `domains`, `lists` | `ChangedEvent` (`{}`): refetch |
+        | `units` | `UnitsEvent`, whenever the core changes the scheduled unit set: apply (blast, auto-corrupt, apply, toggle, stash run/inject/merge/reroll, GH corrupt), max-infinite eviction, `DELETE /blast/units[/{id}]`, savestate loads (slots, stash original/run, protection back/last: units are cleared on load, like RTCV), reset, ROM load/close, connect and disconnect. Refetch `GET /blast/units`. One operation may send several. Units expiring in the emulator send nothing. |
         | `log` | `LogEvent` |
       responses:
         "200":
@@ -1109,7 +1125,7 @@ components:
 
     Capabilities:
       type: object
-      required: [savestates, screenshot, input, loadRom, reset, maxPayload]
+      required: [savestates, screenshot, input, loadRom, reset, maxPayload, scanlineUnits, hardUnits]
       properties:
         savestates: { type: boolean }
         screenshot: { type: boolean }
@@ -1117,6 +1133,8 @@ components:
         loadRom: { type: boolean }
         reset: { type: boolean }
         maxPayload: { type: integer, format: int64 }
+        scanlineUnits: { type: boolean, description: The emulator implements `scanline` units. }
+        hardUnits: { type: boolean, description: The emulator implements `hard` units. }
 
     GameState:
       type: string
@@ -1387,8 +1405,9 @@ components:
       description: |
         Defaults: nightmare, intensity 1, errorDelay 1, spread, precision 1,
         alignment 0, autoCorrupt false, maxInfiniteUnits 50, lockUnits
-        false; engine parameters as in RTCV (full min/max ranges).
-      required: [engine, intensity, errorDelay, radius, precision, alignment, autoCorrupt, maxInfiniteUnits, lockUnits, nightmare, hellgenie, distortion, vector, cluster, custom, reroll, gameProtection]
+        false, freezeMode hard; engine parameters as in RTCV (full min/max
+        ranges).
+      required: [engine, intensity, errorDelay, radius, precision, alignment, autoCorrupt, maxInfiniteUnits, lockUnits, freezeMode, nightmare, hellgenie, distortion, vector, cluster, custom, reroll, gameProtection]
       properties:
         engine: { $ref: "#/components/schemas/Engine" }
         intensity: { type: integer, format: int64, minimum: 1 }
@@ -1399,6 +1418,7 @@ components:
         autoCorrupt: { type: boolean }
         maxInfiniteUnits: { type: integer, minimum: 1 }
         lockUnits: { type: boolean }
+        freezeMode: { $ref: "#/components/schemas/FreezeMode" }
         nightmare: { $ref: "#/components/schemas/NightmareSettings" }
         hellgenie: { $ref: "#/components/schemas/HellgenieSettings" }
         distortion: { $ref: "#/components/schemas/DistortionSettings" }
@@ -1407,6 +1427,17 @@ components:
         custom: { $ref: "#/components/schemas/CustomSettings" }
         reroll: { $ref: "#/components/schemas/RerollSettings" }
         gameProtection: { $ref: "#/components/schemas/GameProtectionSettings" }
+
+    FreezeMode:
+      type: string
+      enum: [frame, scanline, hard]
+      description: |
+        How infinite units (lifetime 0) are enforced (emulator API
+        `Unit.mode`): `frame` writes once per frame (RTCV), `scanline` also
+        at every scanline, `hard` also intercepts CPU/DMA writes. `hard`
+        applies to value units only; store units get `scanline` at most.
+        When the emulator lacks the mode (`Capabilities.hardUnits`,
+        `scanlineUnits`) the core falls back to `scanline`, then `frame`.
 
     PrecisionRangesPatch:
       type: object
@@ -1498,6 +1529,7 @@ components:
         autoCorrupt: { type: boolean }
         maxInfiniteUnits: { type: integer, minimum: 1 }
         lockUnits: { type: boolean }
+        freezeMode: { $ref: "#/components/schemas/FreezeMode" }
         nightmare: { $ref: "#/components/schemas/NightmareSettingsPatch" }
         hellgenie: { $ref: "#/components/schemas/HellgenieSettingsPatch" }
         distortion: { $ref: "#/components/schemas/DistortionSettingsPatch" }
@@ -1583,7 +1615,7 @@ components:
     EmuUnit:
       type: object
       description: A unit scheduled in the emulator (emulator API `Unit`). Exactly one of `value` and `store` is set.
-      required: [id, domain, address, size, tilt, delay, lifetime, loop, loopDelay]
+      required: [id, domain, address, size, tilt, delay, lifetime, loop, loopDelay, mode]
       properties:
         id: { type: integer, format: int64 }
         domain: { type: string }
@@ -1596,6 +1628,7 @@ components:
         lifetime: { type: integer, format: int64 }
         loop: { type: boolean }
         loopDelay: { type: integer, format: int64 }
+        mode: { $ref: "#/components/schemas/FreezeMode", description: How the emulator enforces the write. }
 
     # ---- Glitch Harvester ----
 
@@ -1699,7 +1732,7 @@ components:
 
     EventType:
       type: string
-      enum: [status, frame, blast, stash, stockpile, savestates, settings, domains, lists, log]
+      enum: [status, frame, blast, stash, stockpile, savestates, settings, domains, lists, units, log]
 
     FrameEvent:
       type: object
@@ -1714,6 +1747,17 @@ components:
         count: { type: integer, description: Units in the generated layer. }
         engine: { $ref: "#/components/schemas/Engine" }
         elapsedMs: { type: number, format: double }
+
+    UnitsReason:
+      type: string
+      enum: [apply, remove, clear, load, reset, game, connect, disconnect]
+
+    UnitsEvent:
+      type: object
+      required: [reason, cleared]
+      properties:
+        reason: { $ref: "#/components/schemas/UnitsReason" }
+        cleared: { type: integer, description: "Units removed by a savestate load (`load`) or reset (`reset`); 0 otherwise." }
 
     ChangedEvent:
       type: object

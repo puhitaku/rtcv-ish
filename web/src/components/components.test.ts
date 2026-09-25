@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import EnginePanel from './panels/EnginePanel.vue'
 import SavestateManager from './harvester/SavestateManager.vue'
+import SettingsPanel from './panels/SettingsPanel.vue'
 import TopBar from './TopBar.vue'
 import { mockFetch } from '@/test/fetch'
 import { settingsFixture, statusFixture } from '@/test/fixtures'
@@ -244,5 +245,55 @@ describe('TopBar busy / unresponsive', () => {
     const posts = calls.filter((c) => c.method === 'POST').map((c) => c.path)
     expect(posts).toEqual(['/api/emulator/quit', '/api/emulator/disconnect'])
     expect(st.connected).toBe(false)
+  })
+})
+
+describe('freeze mode setting', () => {
+  it('is in the Settings panel step settings and PATCHes freezeMode', async () => {
+    const { calls } = mockFetch({
+      'PATCH /api/settings': (c) => deepMerge(settingsFixture(), c.body),
+    })
+    useSettingsStore().settings = settingsFixture()
+    useStatusStore().set(statusFixture())
+    const w = mount(SettingsPanel)
+    const sel = w.find(tid('settings-freeze-mode'))
+    expect((sel.element as HTMLSelectElement).value).toBe('hard')
+    expect(sel.findAll('option').map((o) => o.text())).toEqual([
+      'per frame',
+      'per scanline',
+      'hard',
+    ])
+    expect(w.find(tid('settings-freeze-mode-fallback')).exists()).toBe(false)
+    await sel.setValue('scanline')
+    await flushPromises()
+    expect(calls.at(-1)).toMatchObject({ method: 'PATCH', body: { freezeMode: 'scanline' } })
+    expect(useSettingsStore().settings!.freezeMode).toBe('scanline')
+  })
+
+  it('shows the fallback when the emulator lacks the mode', () => {
+    useSettingsStore().settings = settingsFixture()
+    const s = statusFixture()
+    const caps = { ...s.emulator!.capabilities, hardUnits: false, scanlineUnits: false }
+    useStatusStore().set({ ...s, emulator: { ...s.emulator!, capabilities: caps } })
+    const w = mount(SettingsPanel)
+    const opts = w.find(tid('settings-freeze-mode')).findAll('option')
+    expect(opts.map((o) => o.text())).toEqual([
+      'per frame',
+      'per scanline (unsupported)',
+      'hard (unsupported)',
+    ])
+    expect(w.find(tid('settings-freeze-mode-fallback')).text()).toContain('using per frame')
+  })
+
+  it('is in the Freeze, Hellgenie, Pipe and Custom engine blocks', () => {
+    for (const engine of ['freeze', 'hellgenie', 'pipe', 'custom'] as const) {
+      setActivePinia(createPinia())
+      useSettingsStore().settings = { ...settingsFixture(), engine }
+      const w = mount(EnginePanel)
+      expect(w.find(tid('freeze-mode')).exists(), engine).toBe(true)
+      w.unmount()
+    }
+    useSettingsStore().settings = settingsFixture()
+    expect(mount(EnginePanel).find(tid('freeze-mode')).exists()).toBe(false)
   })
 })

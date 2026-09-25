@@ -1,4 +1,4 @@
-import type { BlastEvent, FrameEvent, LogEvent, Status } from '@/api/types'
+import type { BlastEvent, FrameEvent, LogEvent, Status, UnitsEvent } from '@/api/types'
 import { useDomainsStore } from './domains'
 import { useListsStore } from './lists'
 import { useLogStore } from './log'
@@ -19,6 +19,7 @@ export const EVENT_TYPES = [
   'settings',
   'domains',
   'lists',
+  'units',
   'log',
 ] as const
 
@@ -34,9 +35,32 @@ function refetch(what: string, f: Refetch): Promise<void> {
   )
 }
 
+/**
+ * Refetches the scheduled units while a view shows them. Without a
+ * connection there are none.
+ */
+function refetchUnits(): Promise<void> {
+  const units = useUnitsStore()
+  if (!useStatusStore().connected) {
+    units.reset()
+    return Promise.resolve()
+  }
+  if (!units.watchers) return Promise.resolve()
+  return refetch('units', units.refresh)
+}
+
+/** "N scheduled units cleared by savestate load", or '' when nothing was cleared. */
+export function unitsClearedMessage(e: UnitsEvent): string {
+  if (e.cleared <= 0) return ''
+  const what = e.reason === 'load' ? 'savestate load' : e.reason === 'reset' ? 'reset' : ''
+  if (!what) return ''
+  return `${e.cleared} scheduled unit${e.cleared === 1 ? '' : 's'} cleared by ${what}`
+}
+
 /** Refetches every resource (initial load and after SSE reconnects). */
 export function refetchAll(): Promise<void[]> {
   return Promise.all([
+    refetchUnits(),
     refetch('status', useStatusStore().fetch),
     refetch('settings', useSettingsStore().fetch),
     refetch('domains', useDomainsStore().fetch),
@@ -63,8 +87,9 @@ export async function handleEvent(type: string, raw: string): Promise<void> {
       useStatusStore().set(s)
       // A new ROM or connection changes the domain list.
       const gk = `${s.connected}|${s.game?.romPath ?? ''}|${s.game?.state === 'noRom'}`
-      if (lastGameKey && gk !== lastGameKey) await refetch('domains', useDomainsStore().fetch)
+      const changed = lastGameKey && gk !== lastGameKey
       lastGameKey = gk
+      if (changed) await Promise.all([refetch('domains', useDomainsStore().fetch), refetchUnits()])
       return
     }
     case 'frame':
@@ -76,9 +101,12 @@ export async function handleEvent(type: string, raw: string): Promise<void> {
         'info',
         `blast: ${b.count} units (${b.engine}, ${b.elapsedMs.toFixed(1)} ms)`,
       )
-      const units = useUnitsStore()
-      if (units.units.length) await refetch('units', units.fetch)
       return
+    }
+    case 'units': {
+      const msg = unitsClearedMessage(data as UnitsEvent)
+      if (msg) useLogStore().add('info', msg)
+      return refetchUnits()
     }
     case 'log': {
       const l = data as LogEvent

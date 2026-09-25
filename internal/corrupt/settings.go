@@ -23,6 +23,16 @@ const (
 	EngineCustom     Engine = "custom"
 )
 
+// FreezeMode is how infinite units (lifetime 0) are enforced by the
+// emulator; see Unit.mode in design/emulator-api.md.
+type FreezeMode string
+
+const (
+	FreezeFrame    FreezeMode = "frame"
+	FreezeScanline FreezeMode = "scanline"
+	FreezeHard     FreezeMode = "hard"
+)
+
 type Radius string
 
 const (
@@ -323,6 +333,7 @@ type Settings struct {
 	AutoCorrupt      bool                   `json:"autoCorrupt"`
 	MaxInfiniteUnits int                    `json:"maxInfiniteUnits"`
 	LockUnits        bool                   `json:"lockUnits"`
+	FreezeMode       FreezeMode             `json:"freezeMode"`
 	Nightmare        NightmareSettings      `json:"nightmare"`
 	Hellgenie        HellgenieSettings      `json:"hellgenie"`
 	Distortion       DistortionSettings     `json:"distortion"`
@@ -357,6 +368,7 @@ func DefaultSettings() *Settings {
 		Radius:           RadiusSpread,
 		Precision:        1,
 		MaxInfiniteUnits: 50,
+		FreezeMode:       FreezeHard,
 		Nightmare:        NightmareSettings{Algo: NightmareRandom, Ranges: FullRange()},
 		Hellgenie:        HellgenieSettings{Ranges: FullRange()},
 		Distortion:       DistortionSettings{Delay: 50},
@@ -413,6 +425,9 @@ func (s *Settings) Validate() error {
 	}
 	if s.MaxInfiniteUnits < 1 {
 		add("maxInfiniteUnits must be at least 1")
+	}
+	if !oneOf(s.FreezeMode, FreezeFrame, FreezeScanline, FreezeHard) {
+		add("invalid freezeMode %q", s.FreezeMode)
 	}
 	if !oneOf(s.Nightmare.Algo, NightmareRandom, NightmareRandomTilt, NightmareTilt) {
 		add("invalid nightmare algo %q", s.Nightmare.Algo)

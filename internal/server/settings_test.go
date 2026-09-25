@@ -34,6 +34,7 @@ func defaultSettings() gen.Settings {
 		AutoCorrupt:      false,
 		MaxInfiniteUnits: 50,
 		LockUnits:        false,
+		FreezeMode:       gen.FreezeModeHard,
 		Nightmare:        gen.NightmareSettings{Algo: gen.NightmareAlgoRandom, Ranges: fullRanges()},
 		Hellgenie:        gen.HellgenieSettings{Ranges: fullRanges()},
 		Distortion:       gen.DistortionSettings{Delay: 50},
@@ -94,9 +95,11 @@ func TestSettingsPatch(t *testing.T) {
 			Lifetime: ptr(0),
 			Ranges:   &gen.PrecisionRangesPatch{P2: &gen.ValueRange{Min: "16", Max: "32"}},
 		},
-		Reroll: &gen.RerollSettingsPatch{Address: ptr(true)},
+		Reroll:     &gen.RerollSettingsPatch{Address: ptr(true)},
+		FreezeMode: ptr(gen.FreezeModeScanline),
 	})
 	want.Engine = gen.EngineCustom
+	want.FreezeMode = gen.FreezeModeScanline
 	want.Precision = gen.PrecisionN4
 	want.Alignment = 3
 	want.Custom.Source = gen.UnitSourceStore
@@ -129,6 +132,8 @@ func TestSettingsValidation(t *testing.T) {
 		{"alignment >= precision", `{"alignment":1}`},
 		{"alignment >= new precision", `{"precision":2,"alignment":2}`},
 		{"maxInfiniteUnits 0", `{"maxInfiniteUnits":0}`},
+		{"unknown freezeMode", `{"freezeMode":"sometimes"}`},
+		{"freezeMode not a string", `{"freezeMode":2}`},
 		{"unknown field", `{"foo":1}`},
 		{"wrong type", `{"intensity":"five"}`},
 		{"range max too large", `{"nightmare":{"ranges":{"1":{"min":"0","max":"256"}}}}`},
@@ -181,5 +186,18 @@ func TestSettingsPersistence(t *testing.T) {
 	want.AutoCorrupt = false
 	if got := e2.settings(); !reflect.DeepEqual(got, want) {
 		t.Errorf("reloaded settings:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// A settings file written before freezeMode existed loads with the default.
+func TestSettingsFreezeModeDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"engine":"freeze","intensity":3}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, envOptions{noConnect: true, dataDir: dir})
+	st := e.settings()
+	if st.Engine != gen.EngineFreeze || st.Intensity != 3 || st.FreezeMode != gen.FreezeModeHard {
+		t.Errorf("settings = engine %s intensity %d freezeMode %s", st.Engine, st.Intensity, st.FreezeMode)
 	}
 }

@@ -220,3 +220,59 @@ describe('MemoryPanel bitmaps', () => {
     vi.useRealTimers()
   })
 })
+
+describe('MemoryPanel freezes', () => {
+  it('shows frozen cells from server units and unfreezes one unit', async () => {
+    let server = [
+      {
+        id: 5,
+        domain: 'PAL',
+        address: 0x10,
+        size: 1,
+        value: '00',
+        tilt: 0,
+        delay: 0,
+        lifetime: 0,
+        loop: false,
+        loopDelay: 0,
+        mode: 'hard' as const,
+      },
+    ]
+    const { calls } = mockFetch({
+      'GET /api/memory/PAL/words': wordsResponse,
+      'GET /api/memory/PAL': (c) => ({
+        domain: 'PAL',
+        address: Number(c.query.address),
+        data: '00'.repeat(Number(c.query.size)),
+      }),
+      'GET /api/blast/units': () => server,
+      'DELETE /api/blast/units/5': () => {
+        server = []
+        return undefined
+      },
+    })
+    useDomainsStore().domains = [pal]
+    const w = mount(MemoryPanel, { attachTo: document.body })
+    await flushPromises()
+
+    expect(w.find(tid('hex-cell-16')).attributes('title')).toBe('frozen (hard)')
+    expect(w.find(tid('hex-cell-0')).attributes('title')).toBeUndefined()
+
+    await w.find(tid('hex-cell-0')).trigger('click')
+    expect(w.find(tid('mem-freeze')).text()).toBe('Freeze')
+    expect(w.find(tid('mem-freeze')).attributes('title')).toBe(
+      'Freeze the value at the cursor (hard)',
+    )
+
+    await w.find(tid('hex-cell-16')).trigger('click')
+    const btn = w.find(tid('mem-freeze'))
+    expect(btn.text()).toBe('Unfreeze')
+    expect(btn.attributes('title')).toContain('hard')
+    await btn.trigger('click')
+    await flushPromises()
+    expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/blast/units/5')).toBe(true)
+    expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/blast/units')).toBe(false)
+    expect(w.find(tid('hex-cell-16')).attributes('title')).toBeUndefined()
+    expect(w.find(tid('mem-freeze')).text()).toBe('Freeze')
+  })
+})

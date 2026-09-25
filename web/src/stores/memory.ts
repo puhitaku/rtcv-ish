@@ -1,12 +1,15 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import type { Layer } from '@/api/types'
+import { computed, ref, watch } from 'vue'
+import type { EmuUnit, FreezeMode, Layer } from '@/api/types'
 import { readMemory, writeMemory } from '@/api/memory'
 import { hexToBytes } from '@/lib/hex'
 import { newUnit } from '@/lib/layer'
 import { loadJSON, save } from '@/lib/storage'
 import { useDomainsStore } from './domains'
 import { useUnitsStore } from './units'
+import { effectiveFreezeMode } from '@/lib/freeze'
+import { useSettingsStore } from './settings'
+import { useStatusStore } from './status'
 
 /** Hex view rows are this many bytes; jumps align to a row. */
 export const ROW = 16
@@ -28,7 +31,10 @@ export interface Freeze {
   data: string
 }
 
-/** Unit that rewrites `data` every frame forever (lifetime 0). */
+/**
+ * Unit that rewrites `data` forever (lifetime 0); the core enforces it
+ * with the `freezeMode` setting.
+ */
 export function freezeLayer(fs: Freeze[]): Layer {
   return {
     note: 'hex editor freeze',
@@ -44,12 +50,19 @@ export function freezeLayer(fs: Freeze[]): Layer {
   }
 }
 
-/** Memory panel state: the view and the freezes it created. */
+/** A scheduled unit that holds its bytes: an infinite value unit. */
+export function isFreezeUnit(u: EmuUnit): boolean {
+  return u.lifetime === 0 && u.value !== undefined && !u.store
+}
+
+/** Memory panel state. Frozen cells come from the server's scheduled units. */
 export const useMemoryStore = defineStore('memory', () => {
   const domain = ref('')
   const address = ref(0)
   const data = ref<Uint8Array>(new Uint8Array())
-  const freezes = ref<Freeze[]>([])
+  const units = useUnitsStore()
+  /** Scheduled infinite value units, newest last. */
+  const freezes = computed(() => units.units.filter(isFreezeUnit))
   /** Exact byte of the last jump; `seq` changes on every jump. */
   const focus = ref<{ address: number; seq: number } | null>(null)
 
@@ -80,11 +93,25 @@ export const useMemoryStore = defineStore('memory', () => {
     await writeMemory(domain.value, addr, hex)
   }
 
-  function frozenAt(d: string, addr: number): Freeze | undefined {
-    return freezes.value.find(
-      (f) => f.domain === d && addr >= f.address && addr < f.address + f.size,
+  /** Freeze units covering byte `addr` of domain `d`, newest last. */
+  function frozenUnits(d: string, addr: number): EmuUnit[] {
+    return freezes.value.filter(
+      (u) => u.domain === d && addr >= u.address && addr < u.address + u.size,
     )
   }
+
+  /** The newest freeze unit covering the byte, if any. */
+  function frozenAt(d: string, addr: number): EmuUnit | undefined {
+    return frozenUnits(d, addr).at(-1)
+  }
+
+  /** The mode a new freeze gets: the setting (default hard) as the emulator supports it. */
+  const freezeMode = computed<FreezeMode>(() =>
+    effectiveFreezeMode(
+      useSettingsStore().settings?.freezeMode ?? 'hard',
+      useStatusStore().status?.emulator?.capabilities,
+    ),
+  )
 
   async function freeze(addr: number, size: number) {
     const f: Freeze = {
@@ -93,22 +120,19 @@ export const useMemoryStore = defineStore('memory', () => {
       size,
       data: await readMemory(domain.value, addr, size),
     }
-    await useUnitsStore().apply(freezeLayer([f]), false)
-    freezes.value = [...freezes.value.filter((x) => x !== frozenAt(f.domain, addr)), f]
+    await units.apply(freezeLayer([f]), false)
+    await units.refresh()
   }
 
-  /**
-   * The API can only clear all scheduled units, so unfreezing clears them
-   * and re-applies the remaining freezes.
-   */
+  /** Removes the freeze units covering the byte, and nothing else. */
   async function unfreeze(addr: number) {
-    const f = frozenAt(domain.value, addr)
-    if (!f) return
-    const rest = freezes.value.filter((x) => x !== f)
-    const units = useUnitsStore()
-    await units.clear()
-    if (rest.length) await units.apply(freezeLayer(rest), false)
-    freezes.value = rest
+    const us = frozenUnits(domain.value, addr)
+    if (!us.length) return
+    try {
+      for (const u of us) await units.remove(u.id)
+    } finally {
+      await units.refresh()
+    }
   }
 
   return {
@@ -123,6 +147,8 @@ export const useMemoryStore = defineStore('memory', () => {
     read,
     write,
     frozenAt,
+    frozenUnits,
+    freezeMode,
     freeze,
     unfreeze,
   }

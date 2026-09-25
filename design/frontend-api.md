@@ -27,7 +27,7 @@ in the spec.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/status` | Core version, data dir, emulator connection state, emulator info (name, version, system, capabilities), game status (state, frame, ROM path, title, code, console). |
+| GET | `/api/status` | Core version, data dir, emulator connection state, emulator info (name, version, system, capabilities incl. `scanlineUnits`/`hardUnits`), game status (state, frame, ROM path, title, code, console). |
 | GET | `/api/emulators` | Bundled emulators the core can launch (name, executable path, present?). |
 | POST | `/api/emulator/connect` | `{address}`: connect to a running emulator. |
 | POST | `/api/emulator/launch` | `{name, rom?}`: launch a bundled emulator on a free port and connect. |
@@ -64,6 +64,13 @@ Settings object (persisted in `settings.json`):
 - `intensity` (1..), `errorDelay` (frames, 1..), `radius`: `spread | chunk | burst | normalized | proportional | even`
 - `precision`: 1 | 2 | 4 | 8, `alignment` (0..precision-1)
 - `autoCorrupt` (bool), `maxInfiniteUnits` (default 50), `lockUnits` (bool)
+- `freezeMode`: `frame | scanline | hard` (default `hard`): the emulator
+  unit mode (`Unit.mode`, see `design/emulator-api.md`) given to every
+  infinite unit (`lifetime` 0) when a layer is rasterized; finite units
+  are always `frame`. `hard` is value-only, so store units get `scanline`
+  at most. It is resolved at apply time against the emulator's
+  `Capabilities`: without `hardUnits` the core uses `scanline`, without
+  `scanlineUnits` `frame` (logged once per connection at info level).
 - `nightmare`: `{algo: random|randomTilt|tilt, min, max}` (min/max per precision, as in RTCV: `min8,max8,min16,...` or a map keyed by precision)
 - `hellgenie`: `{min, max}` per precision
 - `distortion`: `{delay}`
@@ -79,8 +86,9 @@ Settings object (persisted in `settings.json`):
 |---|---|---|
 | POST | `/api/blast` | Manual blast: generate with current settings and apply. Returns the generated layer. |
 | POST | `/api/blast/apply` | `{layer, backup: bool}`: apply a given layer. |
-| GET | `/api/blast/units` | Units currently scheduled in the emulator. |
+| GET | `/api/blast/units` | Units currently scheduled in the emulator, each with its `mode` (`frame`/`scanline`/`hard`). |
 | DELETE | `/api/blast/units` | Clear all scheduled units. |
+| DELETE | `/api/blast/units/{id}` | Remove one scheduled unit (404 when it is no longer scheduled). |
 | POST | `/api/blast/toggle` | `{on: bool}` BlastLayer ON/OFF using the uncorrupt backup. |
 | POST | `/api/blast/reroll` | `{layer}` → rerolled layer. |
 
@@ -149,6 +157,15 @@ Savestate blobs are stored as files in `data/states/<key>.state`.
 - `frame`: `{frame}` at most 10 times per second.
 - `blast`: `{count, engine, elapsedMs}` after every blast.
 - `stash`, `stockpile`, `savestates`, `settings`, `domains`: "changed, refetch".
+- `units`: `{reason, cleared}` whenever the core changes the set of
+  scheduled units: `apply` (blast, auto-corrupt, apply, toggle, GH
+  corrupt/run/inject/merge/reroll), `remove` (max-infinite eviction,
+  `DELETE /api/blast/units/{id}`), `clear`, `load` (every savestate load
+  clears the units first, like RTCV: slots, stash run/original, protection
+  back/last), `reset`, `game` (ROM load/close or another game),
+  `connect`, `disconnect`. `cleared` is how many units a `load` or `reset`
+  removed. Refetch `/api/blast/units`; an operation may send several.
+  Units that expire in the emulator send nothing.
 - `log`: `{level, msg}` for user-facing messages.
 
 ## Not in the first release
