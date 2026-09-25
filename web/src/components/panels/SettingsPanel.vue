@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
 import NumField from '@/components/ui/NumField.vue'
 import FreezeModeSelect from '@/components/engine/FreezeModeSelect.vue'
-import { SHORTCUTS } from '@/lib/shortcuts'
+import { SHORTCUTS, TAB_LABELS } from '@/lib/shortcuts'
 import { useSettingsPatch } from '@/components/engine/useSettingsPatch'
 import { useListsStore } from '@/stores/lists'
 import { act } from '@/stores/log'
@@ -202,10 +202,16 @@ function chk(e: Event) {
           <dt>
             <kbd class="font-mono text-accent">{{ s.key }}</kbd>
           </dt>
-          <dd>{{ s.label }}</dd>
+          <dd :data-testid="`shortcut-${s.key}`">
+            {{ s.label }}
+            <span v-if="s.tab" class="text-dim">({{ TAB_LABELS[s.tab] }} tab only)</span>
+          </dd>
         </template>
       </dl>
-      <p class="text-dim">Ignored while typing in a field or when a dialog is open.</p>
+      <p class="text-dim">
+        Ignored while typing in a field or when a dialog is open. Tab shortcuts fire only while
+        their tab is shown.
+      </p>
     </BoxPanel>
 
     <BoxPanel title="About">

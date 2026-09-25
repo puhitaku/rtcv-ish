@@ -3,7 +3,7 @@ import { act } from '@/stores/log'
 import { useDialogStore } from '@/stores/dialog'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
-import { useUiStore } from '@/stores/ui'
+import { useUiStore, type Panel } from '@/stores/ui'
 import { useUnitsStore } from '@/stores/units'
 import { loadJSON, save } from '@/lib/storage'
 
@@ -19,23 +19,46 @@ export type GlobalActionId =
   | 'pause'
   | 'reset'
 
-/** Global keyboard shortcuts: plain single keys, no modifiers. */
-export const SHORTCUTS: readonly { key: string; action: GlobalActionId; label: string }[] = [
+/** Actions that live in one tab; the tab's component registers them while mounted. */
+export type TabActionId = 'corrupt' | 'freeze' | 'refresh'
+
+export type ActionId = GlobalActionId | TabActionId
+
+export interface Shortcut {
+  key: string
+  action: ActionId
+  label: string
+  /** Fires only while this tab is active. */
+  tab?: Panel
+}
+
+export const TAB_LABELS: Record<Panel, string> = {
+  harvester: 'Harvester',
+  editor: 'Blast Editor',
+  memory: 'Memory',
+  settings: 'Settings',
+}
+
+/** Keyboard shortcuts: plain single keys, no modifiers. */
+export const SHORTCUTS: readonly Shortcut[] = [
   { key: 'm', action: 'blast', label: 'Manual Blast' },
   { key: 'a', action: 'autoCorrupt', label: 'Toggle Auto-Corrupt' },
   { key: 'p', action: 'protection', label: 'Toggle Game Protection' },
   { key: 'b', action: 'protectionBack', label: 'Game Protection: Back' },
   { key: 'l', action: 'protectionLast', label: 'Game Protection: Last' },
   { key: 'n', action: 'protectionNow', label: 'Game Protection: Now' },
+  { key: 'c', action: 'corrupt', label: 'Corrupt (Blast Tools main button)', tab: 'harvester' },
+  { key: 'f', action: 'freeze', label: 'Freeze / unfreeze at the hex cursor', tab: 'memory' },
+  { key: 'r', action: 'refresh', label: 'Refresh the hex view and bitmaps', tab: 'memory' },
 ]
 
 /** The shortcut key bound to an action, if any. */
-export function shortcutKey(id: GlobalActionId): string | undefined {
+export function shortcutKey(id: ActionId): string | undefined {
   return SHORTCUTS.find((s) => s.action === id)?.key
 }
 
 /** Appends the shortcut hint to a tooltip: "Take a backup now (n)". */
-export function withKeyHint(id: GlobalActionId, title: string): string {
+export function withKeyHint(id: ActionId, title: string): string {
   const k = shortcutKey(id)
   return k ? `${title} (${k})` : title
 }
@@ -142,26 +165,40 @@ export function useGlobalActions(): Record<GlobalActionId, GlobalAction> {
   }
 }
 
+const tabActions = new Map<TabActionId, GlobalAction>()
+
+/**
+ * Registers a tab-scoped action for the calling component's lifetime. The
+ * shortcut fires only while the shortcut's tab is active and this is mounted.
+ */
+export function useTabAction(id: TabActionId, action: GlobalAction) {
+  onMounted(() => tabActions.set(id, action))
+  onBeforeUnmount(() => {
+    if (tabActions.get(id) === action) tabActions.delete(id)
+  })
+}
+
 function isTyping(el: Element | null): boolean {
   if (!(el instanceof HTMLElement)) return false
   if (el.isContentEditable) return true
   return !!el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
 }
 
-/** Registers the global shortcuts on window for the component's lifetime. */
+/** Registers the shortcuts on window for the component's lifetime. */
 export function useShortcuts() {
   const actions = useGlobalActions()
   const dlg = useDialogStore()
+  const ui = useUiStore()
 
   function onKey(e: KeyboardEvent) {
     if (e.defaultPrevented || e.repeat) return
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
-    const s = SHORTCUTS.find((x) => x.key === e.key)
+    const s = SHORTCUTS.find((x) => x.key === e.key && (!x.tab || x.tab === ui.panel))
     if (!s) return
     if (isTyping(e.target as Element | null) || isTyping(document.activeElement)) return
     if (dlg.prompt || dlg.menu || document.querySelector('[role="dialog"]')) return
-    const a = actions[s.action]
-    if (a.disabled.value) return
+    const a = s.tab ? tabActions.get(s.action as TabActionId) : actions[s.action as GlobalActionId]
+    if (!a || a.disabled.value) return
     e.preventDefault()
     void a.run()
   }

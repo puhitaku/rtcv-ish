@@ -5,6 +5,7 @@ import { act } from '@/stores/log'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore, type GhMode } from '@/stores/ui'
 import { useUnitsStore } from '@/stores/units'
+import { useTabAction, withKeyHint } from '@/lib/shortcuts'
 import { useHarvester } from './useHarvester'
 
 const ui = useUiStore()
@@ -12,6 +13,8 @@ const st = useStatusStore()
 const units = useUnitsStore()
 const gh = useHarvester()
 const menu = ref(false)
+
+useTabAction('corrupt', { disabled: gh.mainReason, run: () => gh.mainAction() })
 
 const bl = computed(() => st.status?.blastLayer ?? { available: false, on: false })
 const modes: { id: GhMode; label: string }[] = [
@@ -69,7 +72,7 @@ const modes: { id: GhMode; label: string }[] = [
     <button
       class="btn btn-accent py-3 text-base font-semibold"
       :disabled="!!gh.mainReason.value"
-      :title="gh.mainReason.value"
+      :title="gh.mainReason.value || withKeyHint('corrupt', gh.mainLabel.value)"
       data-testid="gh-main"
       @click="gh.mainAction()"
     >

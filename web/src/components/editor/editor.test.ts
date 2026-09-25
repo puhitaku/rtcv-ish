@@ -166,3 +166,52 @@ describe('address range', () => {
     expect(w.find(tid('address-range-hint')).text()).toBe('start must be below end')
   })
 })
+
+describe('toolbar layout', () => {
+  /** Button labels of a row, with "|" for each separator. */
+  function row(w: ReturnType<typeof mountEditor>['w'], id: string) {
+    return [...w.find(tid(id)).element.querySelectorAll('button, [data-testid="be-sep"]')].map(
+      (e) => (e.tagName === 'BUTTON' ? e.textContent!.trim() : '|'),
+    )
+  }
+
+  it('groups layer actions and unit editing', () => {
+    const { w } = mountEditor([unit()])
+    expect(row(w, 'be-row-layer')).toEqual([
+      'Apply Corruption',
+      'Load + Corrupt',
+      'To Stash',
+      'To Stockpile',
+      '|',
+      'New',
+      'Load .bl',
+      'Save .bl',
+      'Revert',
+      'Save',
+    ])
+    expect(row(w, 'be-row-units')).toEqual([
+      'Add row',
+      'Duplicate',
+      'Break down',
+      'Remove selected',
+      'Remove disabled',
+      '|',
+      'Enable all',
+      '|',
+      'Disable all',
+      'Disable 50%',
+      'Invert Disabled',
+      '|',
+      'Bake to VALUE',
+      'Sanitize duplicates',
+      '|',
+      '▲',
+      '▼',
+      '|',
+      'Open in Memory',
+    ])
+    expect(w.find(tid('be-load-corrupt')).attributes('title')).toBe(
+      'Only for a stash or stockpile item',
+    )
+  })
+})

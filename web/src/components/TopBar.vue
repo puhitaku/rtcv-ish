@@ -75,7 +75,15 @@ function pickedRom(path: string) {
   <header
     class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-panel px-2 py-1"
   >
-    <span class="font-mono font-bold text-accent">rtcv-ish</span>
+    <a
+      href="https://github.com/puhitaku/rtcv-ish"
+      target="_blank"
+      rel="noopener"
+      class="font-mono font-bold text-accent no-underline hover:underline"
+      title="rtcv-ish on GitHub"
+      data-testid="logo-link"
+      >rtcv-ish</a
+    >
 
     <div ref="root" class="relative">
       <button
@@ -87,14 +95,11 @@ function pickedRom(path: string) {
         @click="open = !open"
       >
         <span class="inline-block h-2 w-2 rounded-full" :class="dotClass" />
-        <span class="inline-block min-w-[14ch] text-left" data-testid="emulator-label">
-          {{ emuLabel }}
-        </span>
+        <span data-testid="emulator-label">{{ emuLabel }}</span>
       </button>
       <ConnectPopover v-if="open" @close="open = false" />
     </div>
 
-    <!-- Always rendered with fixed widths so state changes never shift the title. -->
     <span class="flex shrink-0 items-center gap-1" data-testid="quick-actions">
       <button
         class="btn"
@@ -126,7 +131,7 @@ function pickedRom(path: string) {
         Load ROM
       </button>
       <button
-        class="btn w-[8ch]"
+        class="btn"
         :disabled="!!actions.pause.disabled.value"
         :title="
           actions.pause.disabled.value ||
@@ -150,40 +155,30 @@ function pickedRom(path: string) {
     </span>
     <FilePicker v-if="ui.romPicker" @select="pickedRom" @close="ui.romPicker = false" />
 
-    <!-- Fixed-width slot so the indicator never shifts the title or frame counter. -->
-    <span class="w-[18ch] shrink-0 truncate font-mono text-xs text-dim" data-testid="busy-slot">
-      <span
-        v-if="showBusy && st.busy"
-        :title="`The core is running ${st.busy.operation}; new operations wait or fail with BUSY`"
-        data-testid="busy-indicator"
-      >
-        {{ busyLabel }}
-      </span>
-    </span>
-
     <span class="flex items-center gap-1" :title="st.game?.romPath">
       <span class="lbl">game</span>
       <span data-testid="game-title">{{ gameLabel }}</span>
       <span v-if="st.game?.code" class="font-mono text-dim" data-testid="game-code">
         [{{ st.game.code }}]
       </span>
-      <span
-        class="text-warn"
-        :class="{ invisible: st.game?.state !== 'paused' }"
-        :aria-hidden="st.game?.state !== 'paused'"
-      >
-        paused
-      </span>
+      <span v-if="paused" class="text-warn">paused</span>
     </span>
 
     <span class="flex items-center gap-1">
       <span class="lbl">frame</span>
-      <span class="inline-block min-w-[9ch] font-mono tabular-nums" data-testid="frame-counter">{{
-        st.frame
-      }}</span>
+      <span class="font-mono tabular-nums" data-testid="frame-counter">{{ st.frame }}</span>
     </span>
 
     <span class="flex-1" />
+
+    <span
+      v-if="showBusy && st.busy"
+      class="font-mono text-xs text-dim"
+      :title="`The core is running ${st.busy.operation}; new operations wait or fail with BUSY`"
+      data-testid="busy-indicator"
+    >
+      {{ busyLabel }}
+    </span>
 
     <button
       class="btn btn-accent"

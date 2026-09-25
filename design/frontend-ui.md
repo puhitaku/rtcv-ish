@@ -18,7 +18,7 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 ```
 +------------------------------------------------------------------+
 | rtcv-ish [● melonDS 1.1] [Launch][Load ROM][Pause][Reset]         |
-|   [busy]  game hello_world  frame 12345   [Manual Blast] [Auto..] |
+|   game hello_world  frame 12345     [busy] [Manual Blast] [Auto..] |
 |   [Game Protection: OFF] [Back] [Last] [Now]                      |
 +------------------------------------------------------------------+
 | ▾ Engine                                                          |
@@ -33,7 +33,8 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 +------------------------------------------------------------------+
 ```
 
-- Top bar: connection status (with a Connect/Launch popover: address
+- Top bar: the "rtcv-ish" title links to https://github.com/puhitaku/rtcv-ish
+  (new tab, `rel="noopener"`, underlined only on hover), connection status (with a Connect/Launch popover: address
   field, bundled emulator list, ROM path with a Browse… picker that lists
   core-host directories via `/api/browse`, Pause/Resume, Step, Reset,
   Close ROM, Quit), game name and frame counter, the two global actions
@@ -47,17 +48,16 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
   popover's ROM path), Pause/Resume (label follows the game state) and
   Reset (both disabled without a ROM). They are entries of
   `useGlobalActions` (`launch`, `loadRom`, `pause`, `reset`), shared with
-  the popover's Pause/Resume and Reset, so shortcuts can bind them. They
-  are always rendered and Pause/Resume has a fixed width, so they never
-  shift the title or frame counter.
+  the popover's Pause/Resume and Reset, so shortcuts can bind them.
+- Left side spacing: the chip, the quick actions, the game title and the
+  frame counter are separated by the same normal gap, with no reserved
+  empty slots or minimum widths; the frame counter uses tabular digits.
 - Stuck emulator: once `Status.busy` has been set for at least 1 s
   (elapsed time ticks locally from `sinceMs`), a small monospace
-  `<operation> <seconds>s` appears next to the connection status, so fast
-  operations such as a manual blast never show it. It sits in a
-  fixed-width slot, the connection label has a minimum width, the
-  "paused" marker keeps its space while hidden and the frame counter uses
-  tabular digits with a minimum width, so the game title and frame
-  counter never move on status changes. When `Status.unresponsive` is true
+  `<operation> <seconds>s` appears in the right-aligned group,
+  immediately left of Manual Blast, so fast operations such as a manual
+  blast never show it. Everything on the right is right-aligned, so it
+  takes its natural width without moving the left side. When `Status.unresponsive` is true
   the connection chip turns the warning color, reads "unresponsive" and
   its tooltip says the emulator stopped answering. In the popover,
   Disconnect and Quit stay clickable while connected, even when busy or
@@ -122,19 +122,29 @@ Four areas like RTCV:
   mode toggle, click saves or loads, paging.
 - Stash history: list; click runs it (if Load on select); ▲▼, To
   Stockpile, Clear; context: open in Blast Editor, rename, merge.
+- The stash list and the stockpile table fill the height their box gets
+  from the grid row (at least 10rem) and scroll inside, so they never
+  grow the panel. When keys are appended they scroll to the bottom;
+  removals, renames, reorders and loading a whole stockpile leave the
+  scroll position alone.
 - Stockpile: table (name, game, system, note); click runs; Load/Save/
   Save as/Import (.sks upload/download and host paths), Clear, Remove,
   Rename, move up/down; context: open in Blast Editor.
 
 ### Blast Editor
 
-Opened for a stash or stockpile key (or a fresh layer). Table of units
-with RTCV's columns (togglable), filter bar, side property editor for the
-selected rows (multi-edit), buttons: Disable 50%, Invert Disabled, Remove
-Disabled, Enable/Disable everything, Remove selected, Duplicate, Add row,
-Shift selected (field + amount), Load + Corrupt, Apply Corruption, Send
-to Stash, To Stockpile, Bake to VALUE, Break down, Sanitize duplicates,
-Load/Save `.bl`. Layer size label.
+Opened for a stash or stockpile key (or a fresh layer). A header line
+(title, "modified", layer size), then two toolbar rows, then the filter
+bar, the table of units with RTCV's columns (togglable) and a side
+property editor for the selected rows (multi-edit).
+
+- Row 1, layer actions: Apply Corruption, Load + Corrupt (tooltip "Load
+  this key's savestate, then apply the layer"), To Stash, To Stockpile;
+  a separator; New, Load `.bl`, Save `.bl`, Revert, Save.
+- Row 2, unit editing, groups separated by vertical rules: [Add row,
+  Duplicate, Break down, Remove selected, Remove disabled] [Enable all]
+  [Disable all, Disable 50%, Invert Disabled] [Bake to VALUE, Sanitize
+  duplicates] [Shift field / amount ▲▼] [Open in Memory].
 
 - Help: every property label and checkbox, and every column header, has a
   tooltip panel (hover or keyboard focus, short delay, Escape closes)
@@ -154,9 +164,19 @@ Load/Save `.bl`. Layer size label.
 
 ### Memory / Hex
 
-Domain select, address input, a hex view (16 bytes per row, 1/2/4-byte
-grouping), editing by typing, Freeze/Unfreeze, Refresh, and a screenshot
-box.
+Domain select, address input with Go, paging ◀◀ ◀ ▶ ▶▶ (±0x100 and
+±0x1000; the big steps clamp to the start of the domain and its last full
+page), Word (bytes per cell: 1/2/4), Refresh, auto refresh,
+Freeze/Unfreeze, a hex view (16 bytes per row) and a screenshot box.
+
+Hex editing is explicit. A click or the arrow keys only move the cursor;
+Enter or a double-click starts editing the cursor cell (shown outlined,
+with `_` for the missing digits). In edit mode hex digits are consumed
+(other plain keys are swallowed), typing the last digit writes the cell
+and moves to the next one still in edit mode, Enter writes the digits
+typed so far (zero-padded on the left) and leaves edit mode on the next
+cell, and Escape cancels. Outside edit mode `f` and `r` reach the Memory
+tab shortcuts.
 
 Frozen cells are derived from the server's scheduled units
 (`GET /api/blast/units`: infinite value units), never from a client-side
@@ -237,6 +257,15 @@ shortcut list, data directory, log level, About.
   select or contenteditable, or while a dialog, prompt or context menu is
   open. The key map is one table in `web/src/lib/shortcuts.ts`; button
   tooltips show the key and Settings lists all shortcuts.
+- Tab shortcuts: a table entry may carry a `tab`; it fires only while
+  that tab is active, under the same rules (not while typing, not with a
+  dialog open, not while the action is disabled). The tab's component
+  registers the action with `useTabAction` while mounted. `c` runs the
+  Harvester's main Blast Tools button (Corrupt / Inject / Original /
+  Merge, same disabled reason and log line), `f` freezes or unfreezes at
+  the hex cursor and `r` refreshes the hex view and bitmaps (Memory).
+  Tooltips read "Corrupt (c)", "... (f)", "... (r)"; Settings shows the
+  tab next to each scoped shortcut.
 
 ## Testing
 
@@ -245,5 +274,6 @@ shortcut list, data directory, log level, About.
 - Playwright: against `rtcv-ish` with the fake emulator: connect, load a
   ROM, manual blast, create a savestate slot, corrupt, stash appears,
   send to stockpile, open in Blast Editor, disable 50%, apply, export
-  stockpile, quick actions (Pause/Resume, Reset), theme setting, Engine
-  section collapse.
+  stockpile, quick actions (Pause/Resume, Reset), Blast Editor toolbar
+  order, hex view edit mode and the `f` / `r` shortcuts, ±0x1000 paging,
+  theme setting, Engine section collapse.

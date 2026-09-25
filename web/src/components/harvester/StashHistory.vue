@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import BoxPanel from '@/components/ui/BoxPanel.vue'
 import { useDialogStore, type MenuItem } from '@/stores/dialog'
 import { act } from '@/stores/log'
@@ -7,6 +7,7 @@ import { useStashStore } from '@/stores/stash'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
 import { clickSelect, useHarvester } from './useHarvester'
+import { useScrollOnAppend } from './useScrollOnAppend'
 
 const stash = useStashStore()
 const st = useStatusStore()
@@ -17,6 +18,9 @@ const gh = useHarvester()
 const sel = computed(() => ui.stashSelection)
 const single = computed(() => (sel.value.length === 1 ? sel.value[0]! : null))
 const keys = computed(() => stash.keys.map((k) => k.key))
+
+const list = ref<HTMLElement | null>(null)
+useScrollOnAppend(list, () => keys.value)
 
 function select(key: string, ev: MouseEvent) {
   ui.ghSource = 'stash'
@@ -119,31 +123,35 @@ function onContext(key: string, ev: MouseEvent) {
     <template #actions>
       <span class="font-mono normal-case" data-testid="stash-count">{{ stash.keys.length }}</span>
     </template>
-    <ul
-      class="min-h-40 flex-1 overflow-auto border border-line bg-inset"
-      role="listbox"
-      aria-multiselectable="true"
-      data-testid="stash-list"
-    >
-      <li v-if="!stash.keys.length" class="p-1 text-dim">empty</li>
-      <li
-        v-for="k in stash.keys"
-        :key="k.key"
-        role="option"
-        tabindex="0"
-        :aria-selected="sel.includes(k.key)"
-        class="flex cursor-pointer items-center gap-2 px-1.5 py-0.5 hover:bg-panel"
-        :class="{ 'row-sel': sel.includes(k.key) }"
-        data-testid="stash-item"
-        :data-key="k.key"
-        @click="select(k.key, $event)"
-        @keydown.enter="select(k.key, $event as unknown as MouseEvent)"
-        @contextmenu="onContext(k.key, $event)"
+    <!-- The list fills the box without growing it; it scrolls inside. -->
+    <div class="relative min-h-40 flex-1">
+      <ul
+        ref="list"
+        class="absolute inset-0 overflow-y-auto border border-line bg-inset"
+        role="listbox"
+        aria-multiselectable="true"
+        data-testid="stash-list"
       >
-        <span class="flex-1 truncate">{{ k.alias || k.key }}</span>
-        <span class="font-mono text-[11px] text-dim">{{ k.unitCount }}u</span>
-      </li>
-    </ul>
+        <li v-if="!stash.keys.length" class="p-1 text-dim">empty</li>
+        <li
+          v-for="k in stash.keys"
+          :key="k.key"
+          role="option"
+          tabindex="0"
+          :aria-selected="sel.includes(k.key)"
+          class="flex cursor-pointer items-center gap-2 px-1.5 py-0.5 hover:bg-panel"
+          :class="{ 'row-sel': sel.includes(k.key) }"
+          data-testid="stash-item"
+          :data-key="k.key"
+          @click="select(k.key, $event)"
+          @keydown.enter="select(k.key, $event as unknown as MouseEvent)"
+          @contextmenu="onContext(k.key, $event)"
+        >
+          <span class="flex-1 truncate">{{ k.alias || k.key }}</span>
+          <span class="font-mono text-[11px] text-dim">{{ k.unitCount }}u</span>
+        </li>
+      </ul>
+    </div>
     <div class="flex flex-wrap gap-1">
       <button class="btn" :disabled="!stash.keys.length" data-testid="stash-up" @click="step(-1)">
         ▲

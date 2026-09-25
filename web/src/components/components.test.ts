@@ -3,6 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import EngineConfig from './engine/EngineConfig.vue'
 import SavestateManager from './harvester/SavestateManager.vue'
+import StashHistory from './harvester/StashHistory.vue'
+import StockpileManager from './harvester/StockpileManager.vue'
+import { appended } from './harvester/useScrollOnAppend'
 import SettingsPanel from './panels/SettingsPanel.vue'
 import EngineSection from './EngineSection.vue'
 import SideBar from './SideBar.vue'
@@ -11,9 +14,11 @@ import { mockFetch } from '@/test/fetch'
 import { settingsFixture, statusFixture } from '@/test/fixtures'
 import { useLogStore } from '@/stores/log'
 import { deepMerge, useSettingsStore } from '@/stores/settings'
+import { useStashStore } from '@/stores/stash'
 import { useStatusStore } from '@/stores/status'
+import { useStockpileStore } from '@/stores/stockpile'
 import { useUiStore } from '@/stores/ui'
-import type { Settings } from '@/api/types'
+import type { Settings, StashKey } from '@/api/types'
 
 const tid = (id: string) => `[data-testid="${id}"]`
 
@@ -166,6 +171,32 @@ describe('TopBar', () => {
   })
 })
 
+describe('TopBar layout', () => {
+  it('links the logo to the repository in a new tab', () => {
+    mockFetch({})
+    const w = mount(TopBar)
+    const a = w.find(tid('logo-link'))
+    expect(a.element.tagName).toBe('A')
+    expect(a.text()).toBe('rtcv-ish')
+    expect(a.attributes('href')).toBe('https://github.com/puhitaku/rtcv-ish')
+    expect(a.attributes('target')).toBe('_blank')
+    expect(a.attributes('rel')).toBe('noopener')
+    expect(a.classes()).toContain('no-underline')
+    expect(a.classes()).toContain('hover:underline')
+  })
+
+  it('reserves no fixed-width slots on the left side', () => {
+    mockFetch({})
+    useStatusStore().set(statusFixture())
+    const w = mount(TopBar)
+    expect(w.find(tid('busy-slot')).exists()).toBe(false)
+    for (const id of ['quick-actions', 'emulator-label', 'frame-counter', 'qa-pause']) {
+      expect(w.find(tid(id)).attributes('class') ?? '').not.toMatch(/\b(min-)?w-\[/)
+    }
+    expect(w.find(tid('frame-counter')).classes()).toContain('tabular-nums')
+  })
+})
+
 describe('TopBar busy / unresponsive', () => {
   afterEach(() => vi.useRealTimers())
 
@@ -175,12 +206,10 @@ describe('TopBar busy / unresponsive', () => {
     const st = useStatusStore()
     st.set(statusFixture())
     const w = mount(TopBar)
-    expect(w.find(tid('busy-slot')).exists()).toBe(true)
 
     st.set(statusFixture({ busy: { operation: 'blast', sinceMs: 0 } }))
     await flushPromises()
     expect(w.find(tid('busy-indicator')).exists()).toBe(false)
-    expect(w.find(tid('busy-slot')).exists()).toBe(true)
     expect(w.find(tid('manual-blast')).attributes('disabled')).toBeDefined()
 
     vi.advanceTimersByTime(999)
@@ -191,12 +220,14 @@ describe('TopBar busy / unresponsive', () => {
     vi.advanceTimersByTime(1)
     st.tick()
     await flushPromises()
-    expect(w.find(tid('busy-indicator')).text()).toBe('blast 1s')
+    const busy = w.find(tid('busy-indicator'))
+    expect(busy.text()).toBe('blast 1s')
+    // Right-aligned, immediately left of Manual Blast.
+    expect(busy.element.nextElementSibling?.getAttribute('data-testid')).toBe('manual-blast')
 
     st.set(statusFixture())
     await flushPromises()
     expect(w.find(tid('busy-indicator')).exists()).toBe(false)
-    expect(w.find(tid('busy-slot')).exists()).toBe(true)
   })
 
   it('shows the busy operation with elapsed seconds and disables operations', async () => {
@@ -509,5 +540,85 @@ describe('layout', () => {
     useSettingsStore().settings = settingsFixture()
     const w2 = mount(EngineSection)
     expect(w2.find(tid('engine-toggle')).attributes('aria-expanded')).toBe('false')
+  })
+})
+
+describe('Harvester lists scroll on append', () => {
+  const sk = (key: string): StashKey => ({
+    key,
+    parentKey: 's',
+    alias: '',
+    note: '',
+    game: { title: 'g', code: '', romPath: '/r/g.nds', system: 'nds' },
+    selectedDomains: [],
+    unitCount: 1,
+    createdAt: '2026-01-01T00:00:00Z',
+  })
+
+  /** jsdom has no layout: fake a scrollable element. */
+  function fakeScroll(el: HTMLElement) {
+    let top = 0
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 500 })
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => (top = v),
+    })
+  }
+
+  it('detects appends only', () => {
+    expect(appended(['a'], ['a', 'b'])).toBe(true)
+    expect(appended([], ['a'])).toBe(true)
+    expect(appended(['a', 'b'], ['a'])).toBe(false)
+    expect(appended(['a', 'b'], ['b', 'a'])).toBe(false)
+    expect(appended(['a'], ['b', 'c'])).toBe(false)
+    expect(appended(['a'], ['a'])).toBe(false)
+  })
+
+  it('scrolls the stash list to the bottom when an entry is added', async () => {
+    mockFetch({})
+    useStatusStore().set(statusFixture())
+    const stash = useStashStore()
+    stash.keys = [sk('a'), sk('b')]
+    const w = mount(StashHistory)
+    const list = w.find(tid('stash-list')).element as HTMLElement
+    fakeScroll(list)
+    // Bounded: the list is positioned inside a filler, so it never grows the box.
+    expect(list.classList).toContain('absolute')
+    expect(list.classList).toContain('overflow-y-auto')
+
+    stash.keys = [...stash.keys, sk('c')]
+    await flushPromises()
+    expect(list.scrollTop).toBe(500)
+
+    // The user scrolls up; renames and removals do not jump.
+    list.scrollTop = 100
+    stash.keys = stash.keys.map((k) => (k.key === 'a' ? { ...k, alias: 'x' } : k))
+    await flushPromises()
+    expect(list.scrollTop).toBe(100)
+    stash.keys = stash.keys.slice(1)
+    await flushPromises()
+    expect(list.scrollTop).toBe(100)
+
+    stash.keys = [...stash.keys, sk('d')]
+    await flushPromises()
+    expect(list.scrollTop).toBe(500)
+  })
+
+  it('scrolls the stockpile table on append but not on reload', async () => {
+    mockFetch({})
+    useStatusStore().set(statusFixture())
+    const sp = useStockpileStore()
+    sp.keys = [sk('a')]
+    const w = mount(StockpileManager)
+    const box = w.find(tid('stockpile-scroll')).element as HTMLElement
+    fakeScroll(box)
+
+    sp.keys = [sk('x'), sk('y')]
+    await flushPromises()
+    expect(box.scrollTop).toBe(0)
+    sp.keys = [...sp.keys, sk('z')]
+    await flushPromises()
+    expect(box.scrollTop).toBe(500)
   })
 })

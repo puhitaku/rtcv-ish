@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import MemoryBitmap from './MemoryBitmap.vue'
+import { defineComponent, h } from 'vue'
 import MemoryPanel from '@/components/panels/MemoryPanel.vue'
+import { useShortcuts } from '@/lib/shortcuts'
 import { mockFetch, type Call } from '@/test/fetch'
 import { statusFixture } from '@/test/fixtures'
 import { useDomainsStore } from '@/stores/domains'
 import { useMemoryStore } from '@/stores/memory'
 import { useStatusStore } from '@/stores/status'
+import { useUiStore } from '@/stores/ui'
 import type { Domain } from '@/api/types'
 
 const tid = (id: string) => `[data-testid="${id}"]`
@@ -303,7 +306,7 @@ describe('MemoryPanel freezes', () => {
     await w.find(tid('hex-cell-0')).trigger('click')
     expect(w.find(tid('mem-freeze')).text()).toBe('Freeze')
     expect(w.find(tid('mem-freeze')).attributes('title')).toBe(
-      'Freeze the value at the cursor (hard)',
+      'Freeze the value at the cursor (hard) (f)',
     )
 
     await w.find(tid('hex-cell-16')).trigger('click')
@@ -316,5 +319,182 @@ describe('MemoryPanel freezes', () => {
     expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/blast/units')).toBe(false)
     expect(w.find(tid('hex-cell-16')).attributes('title')).toBeUndefined()
     expect(w.find(tid('mem-freeze')).text()).toBe('Freeze')
+  })
+})
+
+/** Memory panel with the app's shortcut dispatcher, on the Memory tab. */
+function mountMemoryApp() {
+  useUiStore().panel = 'memory'
+  const Host = defineComponent({
+    setup() {
+      useShortcuts()
+      return () => h(MemoryPanel)
+    },
+  })
+  return mount(Host, { attachTo: document.body })
+}
+
+function memRoutes(extra: Record<string, (c: Call) => unknown> = {}) {
+  return mockFetch({
+    'GET /api/memory/PAL/words': wordsResponse,
+    'GET /api/memory/PAL': (c) => ({
+      domain: 'PAL',
+      address: Number(c.query.address),
+      data: '00'.repeat(Number(c.query.size)),
+    }),
+    'PUT /api/memory/PAL': () => undefined,
+    'POST /api/blast/apply': () => undefined,
+    'GET /api/blast/units': () => [],
+    ...extra,
+  })
+}
+
+async function key(el: Element, k: string) {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+  await flushPromises()
+}
+
+describe('MemoryPanel hex edit mode', () => {
+  it('selects on click, edits only after Enter or double-click', async () => {
+    const { calls } = memRoutes()
+    useDomainsStore().domains = [pal]
+    const w = mount(MemoryPanel, { attachTo: document.body })
+    await flushPromises()
+    const view = w.find(tid('hex-view')).element
+    const puts = () => calls.filter((c) => c.method === 'PUT')
+
+    await w.find(tid('hex-cell-0')).trigger('click')
+    expect(w.find(tid('hex-cell-0')).attributes('data-editing')).toBeUndefined()
+    // Not editing: hex digits are not consumed and write nothing.
+    await key(view, 'a')
+    await key(view, 'b')
+    expect(puts()).toHaveLength(0)
+    expect(w.find(tid('hex-cell-0')).text()).toBe('00')
+
+    // Arrows move the cursor without editing.
+    await key(view, 'ArrowRight')
+    expect(w.find(tid('hex-cell-1')).classes()).toContain('bg-accent')
+
+    // Enter starts editing; the last digit commits and moves on, still editing.
+    await key(view, 'Enter')
+    expect(w.find(tid('hex-cell-1')).attributes('data-editing')).toBe('true')
+    expect(w.find(tid('hex-cell-1')).text()).toBe('__')
+    await key(view, 'a')
+    expect(w.find(tid('hex-cell-1')).text()).toBe('A_')
+    await key(view, 'B')
+    expect(puts().map((c) => c.body)).toEqual([{ address: 1, data: 'ab' }])
+    expect(w.find(tid('hex-cell-2')).attributes('data-editing')).toBe('true')
+
+    // Escape cancels the typed digits and leaves edit mode.
+    await key(view, '7')
+    await key(view, 'Escape')
+    expect(w.find(tid('hex-cell-2')).attributes('data-editing')).toBeUndefined()
+    expect(w.find(tid('hex-cell-2')).text()).toBe('00')
+    expect(puts()).toHaveLength(1)
+
+    // Double-click edits; Enter commits a partial value zero-padded.
+    await w.find(tid('hex-cell-5')).trigger('dblclick')
+    expect(w.find(tid('hex-cell-5')).attributes('data-editing')).toBe('true')
+    await key(view, '5')
+    await key(view, 'Enter')
+    expect(puts().at(-1)!.body).toEqual({ address: 5, data: '05' })
+    expect(w.find(tid('hex-cell-6')).classes()).toContain('bg-accent')
+    expect(w.find(tid('hex-cell-6')).attributes('data-editing')).toBeUndefined()
+    expect(w.text()).toContain(
+      'Click to select, Enter or double-click to edit, f freezes, r refreshes',
+    )
+    w.unmount()
+  })
+})
+
+describe('MemoryPanel navigation', () => {
+  it('pages by 0x1000 clamped to the domain', async () => {
+    memRoutes({
+      'GET /api/memory/RAM/words': wordsResponse,
+      'GET /api/memory/RAM': (c) => ({
+        domain: 'RAM',
+        address: Number(c.query.address),
+        data: '00'.repeat(Number(c.query.size)),
+      }),
+    })
+    useDomainsStore().domains = [ram]
+    const w = mount(MemoryPanel)
+    await flushPromises()
+    const mem = useMemoryStore()
+    expect(mem.address).toBe(0)
+
+    await w.find(tid('mem-prev-big')).trigger('click')
+    expect(mem.address).toBe(0)
+    await w.find(tid('mem-next-big')).trigger('click')
+    expect(mem.address).toBe(0x1000)
+    await w.find(tid('mem-next')).trigger('click')
+    expect(mem.address).toBe(0x1100)
+    await w.find(tid('mem-prev-big')).trigger('click')
+    expect(mem.address).toBe(0x100)
+    await w.find(tid('mem-prev-big')).trigger('click')
+    expect(mem.address).toBe(0)
+
+    // The end clamps to the last full page of the 64 KiB domain.
+    mem.address = 0xf800
+    await w.find(tid('mem-next-big')).trigger('click')
+    expect(mem.address).toBe(0xff00)
+    await w.find(tid('mem-next-big')).trigger('click')
+    expect(mem.address).toBe(0xff00)
+
+    const word = w.find(tid('mem-group')).element.closest('label')!
+    expect(word.textContent).toContain('Word')
+    expect(word.getAttribute('title')).toBe('Bytes per cell')
+    w.unmount()
+  })
+})
+
+describe('MemoryPanel shortcuts', () => {
+  it('f freezes at the cursor and r refreshes, only on the Memory tab', async () => {
+    const { calls } = memRoutes()
+    useDomainsStore().domains = [pal]
+    const w = mountMemoryApp()
+    await flushPromises()
+    const view = w.find(tid('hex-view')).element as HTMLElement
+    const n = (m: string, p: string) => calls.filter((c) => c.method === m && c.path === p).length
+
+    expect(w.find(tid('mem-refresh')).attributes('title')).toBe(
+      'Refresh the hex view and bitmaps (r)',
+    )
+
+    // No cursor: freeze is disabled.
+    await key(view, 'f')
+    expect(n('POST', '/api/blast/apply')).toBe(0)
+
+    await w.find(tid('hex-cell-3')).trigger('click')
+    view.focus()
+    await key(view, 'f')
+    expect(n('POST', '/api/blast/apply')).toBe(1)
+    const applied = calls.find((c) => c.path === '/api/blast/apply')!.body as {
+      layer: { units: { address: number }[] }
+    }
+    expect(applied.layer.units[0]!.address).toBe(3)
+
+    const reads = n('GET', '/api/memory/PAL')
+    const words = n('GET', '/api/memory/PAL/words')
+    await key(view, 'r')
+    expect(n('GET', '/api/memory/PAL')).toBe(reads + 1)
+    expect(n('GET', '/api/memory/PAL/words')).toBe(words + 1)
+
+    // While editing a cell, f is a hex digit and r is swallowed.
+    await key(view, 'Enter')
+    await key(view, 'f')
+    await key(view, 'r')
+    expect(n('POST', '/api/blast/apply')).toBe(1)
+    expect(n('GET', '/api/memory/PAL')).toBe(reads + 1)
+    expect(w.find(tid('hex-cell-3')).text()).toBe('F_')
+    await key(view, 'Escape')
+
+    // Another tab: ignored (the panel stays mounted here only because of the test host).
+    useUiStore().panel = 'settings'
+    await key(view, 'r')
+    await key(view, 'f')
+    expect(n('GET', '/api/memory/PAL')).toBe(reads + 1)
+    expect(n('POST', '/api/blast/apply')).toBe(1)
+    w.unmount()
   })
 })

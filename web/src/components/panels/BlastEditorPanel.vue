@@ -212,7 +212,47 @@ function onKey(e: KeyboardEvent) {
       <span class="font-mono text-dim" data-testid="be-size">
         Layer size: {{ ed.layer.units.length }}
       </span>
-      <span class="flex-1" />
+    </div>
+
+    <!-- Row 1: layer actions, then file / layer management. -->
+    <div class="flex flex-wrap items-center gap-1" data-testid="be-row-layer">
+      <button
+        class="btn btn-accent"
+        :disabled="!!st.needRom"
+        :title="st.needRom || 'Apply the layer to the running game'"
+        data-testid="be-apply"
+        @click="apply"
+      >
+        Apply Corruption
+      </button>
+      <button
+        class="btn btn-accent"
+        :disabled="!keyed || !!st.needRom"
+        :title="needKey || st.needRom || 'Load this key\'s savestate, then apply the layer'"
+        data-testid="be-load-corrupt"
+        @click="loadAndCorrupt"
+      >
+        Load + Corrupt
+      </button>
+      <button
+        class="btn"
+        :disabled="!!needStash"
+        :title="needStash"
+        data-testid="be-send-stash"
+        @click="sendToStash"
+      >
+        To Stash
+      </button>
+      <button
+        class="btn"
+        :disabled="!!needStash"
+        :title="needStash"
+        data-testid="be-to-stockpile"
+        @click="toStockpile"
+      >
+        To Stockpile
+      </button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
       <button class="btn" data-testid="be-new" @click="newLayer">New</button>
       <button class="btn" data-testid="be-load-bl" @click="fileInput?.click()">Load .bl</button>
       <input
@@ -244,23 +284,14 @@ function onKey(e: KeyboardEvent) {
       </button>
     </div>
 
-    <div class="flex flex-wrap items-center gap-1">
-      <button class="btn" data-testid="be-disable50" @click="ed.disable50()">Disable 50%</button>
-      <button class="btn" data-testid="be-invert" @click="ed.invertDisabled()">
-        Invert Disabled
-      </button>
-      <button class="btn" data-testid="be-remove-disabled" @click="ed.removeDisabled()">
-        Remove Disabled
-      </button>
-      <button class="btn" data-testid="be-enable-all" @click="ed.enableAll()">Enable all</button>
-      <button class="btn" data-testid="be-disable-all" @click="ed.disableAll()">Disable all</button>
+    <!-- Row 2: unit editing, grouped. -->
+    <div class="flex flex-wrap items-center gap-1" data-testid="be-row-units">
       <button
         class="btn"
-        :disabled="!ed.selection.length"
-        data-testid="be-remove-selected"
-        @click="ed.removeSelected()"
+        data-testid="be-add"
+        @click="ed.addRow(domains.selected[0] ?? domains.domains[0]?.name ?? '')"
       >
-        Remove selected
+        Add row
       </button>
       <button
         class="btn"
@@ -270,14 +301,43 @@ function onKey(e: KeyboardEvent) {
       >
         Duplicate
       </button>
+      <button class="btn" data-testid="be-breakdown" @click="act(async () => ed.breakDown())">
+        Break down
+      </button>
       <button
         class="btn"
-        data-testid="be-add"
-        @click="ed.addRow(domains.selected[0] ?? domains.domains[0]?.name ?? '')"
+        :disabled="!ed.selection.length"
+        data-testid="be-remove-selected"
+        @click="ed.removeSelected()"
       >
-        Add row
+        Remove selected
       </button>
-      <span class="ml-2 flex items-center gap-1">
+      <button class="btn" data-testid="be-remove-disabled" @click="ed.removeDisabled()">
+        Remove disabled
+      </button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
+      <button class="btn" data-testid="be-enable-all" @click="ed.enableAll()">Enable all</button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
+      <button class="btn" data-testid="be-disable-all" @click="ed.disableAll()">Disable all</button>
+      <button class="btn" data-testid="be-disable50" @click="ed.disable50()">Disable 50%</button>
+      <button class="btn" data-testid="be-invert" @click="ed.invertDisabled()">
+        Invert Disabled
+      </button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
+      <button
+        class="btn"
+        :disabled="!!st.needRom"
+        :title="st.needRom || 'Selected units (all when none selected)'"
+        data-testid="be-bake"
+        @click="act(() => ed.bake(), 'baked to VALUE')"
+      >
+        Bake to VALUE
+      </button>
+      <button class="btn" data-testid="be-sanitize" @click="ed.sanitize()">
+        Sanitize duplicates
+      </button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
+      <span class="flex items-center gap-1">
         <span class="lbl">Shift</span>
         <select v-model="shiftField" class="input" data-testid="be-shift-field">
           <option v-for="f in SHIFT_FIELDS" :key="f" :value="f">{{ f }}</option>
@@ -306,63 +366,11 @@ function onKey(e: KeyboardEvent) {
           ▼
         </button>
       </span>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-1">
-      <button
-        class="btn btn-accent"
-        :disabled="!keyed || !!st.needRom"
-        :title="needKey || st.needRom"
-        data-testid="be-load-corrupt"
-        @click="loadAndCorrupt"
-      >
-        Load + Corrupt
-      </button>
-      <button
-        class="btn btn-accent"
-        :disabled="!!st.needRom"
-        :title="st.needRom"
-        data-testid="be-apply"
-        @click="apply"
-      >
-        Apply Corruption
-      </button>
-      <button
-        class="btn"
-        :disabled="!!needStash"
-        :title="needStash"
-        data-testid="be-send-stash"
-        @click="sendToStash"
-      >
-        Send to Stash
-      </button>
-      <button
-        class="btn"
-        :disabled="!!needStash"
-        :title="needStash"
-        data-testid="be-to-stockpile"
-        @click="toStockpile"
-      >
-        To Stockpile
-      </button>
-      <button
-        class="btn"
-        :disabled="!!st.needRom"
-        :title="st.needRom || 'Selected units (all when none selected)'"
-        data-testid="be-bake"
-        @click="act(() => ed.bake(), 'baked to VALUE')"
-      >
-        Bake to VALUE
-      </button>
-      <button class="btn" data-testid="be-breakdown" @click="act(async () => ed.breakDown())">
-        Break down
-      </button>
-      <button class="btn" data-testid="be-sanitize" @click="ed.sanitize()">
-        Sanitize duplicates
-      </button>
+      <span class="mx-1 h-5 border-l border-line" aria-hidden="true" data-testid="be-sep" />
       <button
         class="btn"
         :disabled="ed.selection.length !== 1"
+        :title="ed.selection.length !== 1 ? 'Select one row' : 'Show the unit in the hex view'"
         data-testid="be-open-hex"
         @click="openHex"
       >

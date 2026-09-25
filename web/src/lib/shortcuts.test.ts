@@ -2,19 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h } from 'vue'
-import { useShortcuts } from './shortcuts'
+import { SHORTCUTS, useShortcuts } from './shortcuts'
+import BlastTools from '@/components/harvester/BlastTools.vue'
 import { mockFetch } from '@/test/fetch'
 import { settingsFixture, statusFixture } from '@/test/fixtures'
 import { useDialogStore } from '@/stores/dialog'
 import { useLogStore } from '@/stores/log'
 import { deepMerge, useSettingsStore } from '@/stores/settings'
+import { useSavestatesStore } from '@/stores/savestates'
 import { useStatusStore } from '@/stores/status'
+import { useUiStore } from '@/stores/ui'
 import type { Settings } from '@/api/types'
 
 const Host = defineComponent({
-  setup() {
+  props: { tools: Boolean },
+  setup(props) {
     useShortcuts()
-    return () => h('div', [h('input', { id: 'field' }), h('button', { id: 'btn' }, 'x')])
+    return () =>
+      h('div', [
+        props.tools ? h(BlastTools) : null,
+        h('input', { id: 'field' }),
+        h('button', { id: 'btn' }, 'x'),
+      ])
   },
 })
 
@@ -134,5 +143,76 @@ describe('useShortcuts', () => {
     st.set(statusFixture({ protectionBackups: 1, unresponsive: true }))
     for (const k of ['m', 'b', 'l', 'n']) await press(k)
     expect(paths(calls)).toEqual([])
+  })
+})
+
+describe('tab-scoped shortcuts', () => {
+  function setupHarvester() {
+    const fetch = mockFetch({
+      'POST /api/stash/corrupt': () => ({
+        key: 'k1',
+        parentKey: 's1',
+        alias: '',
+        note: '',
+        game: { title: 'g', code: '', romPath: '/r/g.nds', system: 'nds' },
+        selectedDomains: [],
+        unitCount: 3,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
+    })
+    useStatusStore().set(statusFixture())
+    useSettingsStore().settings = settingsFixture()
+    w = mount(Host, { props: { tools: true }, attachTo: document.body })
+    return fetch
+  }
+
+  it('lists c, f and r with their tabs', () => {
+    const scoped = SHORTCUTS.filter((s) => s.tab).map((s) => `${s.key}:${s.tab}:${s.action}`)
+    expect(scoped).toEqual(['c:harvester:corrupt', 'f:memory:freeze', 'r:memory:refresh'])
+    expect(new Set(SHORTCUTS.map((s) => s.key)).size).toBe(SHORTCUTS.length)
+  })
+
+  it('c corrupts only on the Harvester tab, respecting the disabled reason', async () => {
+    const { calls } = setupHarvester()
+    const ui = useUiStore()
+    const log = useLogStore()
+    const main = w!.find('[data-testid="gh-main"]')
+
+    // No slot selected: the Corrupt button is disabled and so is c.
+    expect(main.attributes('title')).toBe('Select a savestate slot')
+    await press('c')
+    expect(calls).toHaveLength(0)
+
+    useSavestatesStore().slots = [{ slot: 1, key: 's1', label: '' }]
+    ui.selectedSlot = 1
+    await flushPromises()
+    expect(main.attributes('title')).toBe('Corrupt (c)')
+
+    // Another tab: ignored.
+    ui.panel = 'memory'
+    await press('c')
+    expect(calls).toHaveLength(0)
+
+    // While typing: ignored.
+    ui.panel = 'harvester'
+    const input = document.getElementById('field') as HTMLInputElement
+    input.focus()
+    await press('c', input)
+    input.blur()
+    expect(calls).toHaveLength(0)
+
+    await press('c')
+    expect(paths(calls)).toEqual(['POST /api/stash/corrupt'])
+    expect(calls[0]!.body).toEqual({ slot: 1, loadBefore: true })
+    expect(log.entries.at(-1)?.msg).toBe('corrupted: k1 (3 units)')
+  })
+
+  it('does nothing when the tab component is not mounted', async () => {
+    const { calls } = setup()
+    useUiStore().panel = 'harvester'
+    await press('c')
+    await press('f')
+    await press('r')
+    expect(calls).toHaveLength(0)
   })
 })

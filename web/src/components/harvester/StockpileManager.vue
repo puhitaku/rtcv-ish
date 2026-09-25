@@ -7,6 +7,7 @@ import { EXPORT_URL, useStockpileStore } from '@/stores/stockpile'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
 import { clickSelect, useHarvester } from './useHarvester'
+import { useScrollOnAppend } from './useScrollOnAppend'
 
 const sp = useStockpileStore()
 const st = useStatusStore()
@@ -19,6 +20,9 @@ const importMerge = ref(true)
 const sel = computed(() => ui.stockpileSelection)
 const single = computed(() => (sel.value.length === 1 ? sel.value[0]! : null))
 const keys = computed(() => sp.keys.map((k) => k.key))
+
+const list = ref<HTMLElement | null>(null)
+useScrollOnAppend(list, () => keys.value)
 
 function select(key: string, ev: MouseEvent) {
   ui.ghSource = 'stockpile'
@@ -146,40 +150,47 @@ function onContext(key: string, ev: MouseEvent) {
         Export .sks
       </a>
     </div>
-    <div class="min-h-40 flex-1 overflow-auto border border-line bg-inset">
-      <table class="w-full border-collapse text-left" data-testid="stockpile-table">
-        <thead class="sticky top-0 bg-panel text-dim">
-          <tr>
-            <th class="px-1.5 font-normal">Item Name</th>
-            <th class="px-1.5 font-normal">Game</th>
-            <th class="px-1.5 font-normal">System</th>
-            <th class="px-1.5 font-normal">Note</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="!sp.keys.length">
-            <td colspan="4" class="p-1 text-dim">empty</td>
-          </tr>
-          <tr
-            v-for="k in sp.keys"
-            :key="k.key"
-            tabindex="0"
-            class="cursor-pointer hover:bg-panel"
-            :class="{ 'row-sel': sel.includes(k.key) }"
-            :aria-selected="sel.includes(k.key)"
-            data-testid="stockpile-item"
-            :data-key="k.key"
-            @click="select(k.key, $event)"
-            @keydown.enter="select(k.key, $event as unknown as MouseEvent)"
-            @contextmenu="onContext(k.key, $event)"
-          >
-            <td class="truncate px-1.5">{{ k.alias || k.key }}</td>
-            <td class="truncate px-1.5">{{ k.game.title }}</td>
-            <td class="px-1.5 font-mono">{{ k.game.system }}</td>
-            <td class="max-w-40 truncate px-1.5 text-dim" :title="k.note">{{ k.note }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- The table fills the box without growing it; it scrolls inside. -->
+    <div class="relative min-h-40 flex-1">
+      <div
+        ref="list"
+        class="absolute inset-0 overflow-auto border border-line bg-inset"
+        data-testid="stockpile-scroll"
+      >
+        <table class="w-full border-collapse text-left" data-testid="stockpile-table">
+          <thead class="sticky top-0 bg-panel text-dim">
+            <tr>
+              <th class="px-1.5 font-normal">Item Name</th>
+              <th class="px-1.5 font-normal">Game</th>
+              <th class="px-1.5 font-normal">System</th>
+              <th class="px-1.5 font-normal">Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!sp.keys.length">
+              <td colspan="4" class="p-1 text-dim">empty</td>
+            </tr>
+            <tr
+              v-for="k in sp.keys"
+              :key="k.key"
+              tabindex="0"
+              class="cursor-pointer hover:bg-panel"
+              :class="{ 'row-sel': sel.includes(k.key) }"
+              :aria-selected="sel.includes(k.key)"
+              data-testid="stockpile-item"
+              :data-key="k.key"
+              @click="select(k.key, $event)"
+              @keydown.enter="select(k.key, $event as unknown as MouseEvent)"
+              @contextmenu="onContext(k.key, $event)"
+            >
+              <td class="truncate px-1.5">{{ k.alias || k.key }}</td>
+              <td class="truncate px-1.5">{{ k.game.title }}</td>
+              <td class="px-1.5 font-mono">{{ k.game.system }}</td>
+              <td class="max-w-40 truncate px-1.5 text-dim" :title="k.note">{{ k.note }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <div class="flex flex-wrap gap-1">
       <button

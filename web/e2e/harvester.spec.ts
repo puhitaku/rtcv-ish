@@ -99,6 +99,13 @@ test('connect, blast, harvest, edit and export', async ({ page }) => {
   await tid(page, 'stockpile-edit').click()
   await expect(tid(page, 'be-title')).toContainText('first glitch')
   await expect(tid(page, 'be-size')).toHaveText('Layer size: 10')
+  // Row 1 starts with Apply Corruption; the stash action reads "To Stash".
+  await expect(tid(page, 'be-row-layer').locator('button').first()).toHaveText('Apply Corruption')
+  await expect(tid(page, 'be-send-stash')).toHaveText('To Stash')
+  await expect(tid(page, 'be-load-corrupt')).toHaveAttribute(
+    'title',
+    "Load this key's savestate, then apply the layer",
+  )
   await tid(page, 'be-disable50').click()
   await expect(page.locator('[data-testid="be-row"][data-enabled="false"]')).toHaveCount(5)
   await expect(tid(page, 'be-dirty')).toBeVisible()
@@ -111,6 +118,35 @@ test('connect, blast, harvest, edit and export', async ({ page }) => {
   await tid(page, 'nav-harvester').click()
   await tid(page, 'stockpile-edit').click()
   await expect(page.locator('[data-testid="be-row"][data-enabled="false"]')).toHaveCount(5)
+
+  // Memory: click selects, Enter edits, f / r are shortcuts outside edit mode.
+  await tid(page, 'nav-memory').click()
+  await expect(tid(page, 'hex-cell-32')).toBeVisible()
+  await tid(page, 'hex-cell-32').click()
+  await page.keyboard.press('r')
+  await expect(tid(page, 'hex-cell-32')).not.toHaveAttribute('data-editing', 'true')
+  // Let the refresh finish so the write below is not rejected as busy.
+  await expect(tid(page, 'mem-refresh')).toBeEnabled()
+  await page.keyboard.press('Enter')
+  await expect(tid(page, 'hex-cell-32')).toHaveAttribute('data-editing', 'true')
+  await page.keyboard.type('5a')
+  // Offset 0 holds the fake game's frame counter; a real game may write anywhere.
+  if (!realEmu) await expect(tid(page, 'hex-cell-32')).toHaveText('5A')
+  await expect(tid(page, 'hex-cell-33')).toHaveAttribute('data-editing', 'true')
+  await page.keyboard.press('Escape')
+  await tid(page, 'hex-cell-32').click()
+  // Like the button, f is ignored while the core is busy.
+  await expect(tid(page, 'mem-freeze')).toBeEnabled()
+  await page.keyboard.press('f')
+  await expect(tid(page, 'mem-freeze')).toHaveText('Unfreeze')
+  await expect(tid(page, 'mem-freeze')).toBeEnabled()
+  await page.keyboard.press('f')
+  await expect(tid(page, 'mem-freeze')).toHaveText('Freeze')
+  const addr = tid(page, 'mem-address')
+  await tid(page, 'mem-next-big').click()
+  await expect(addr).toHaveValue('1000')
+  await tid(page, 'mem-prev-big').click()
+  await expect(addr).toHaveValue('0')
 
   // Export the stockpile.
   await tid(page, 'nav-harvester').click()
