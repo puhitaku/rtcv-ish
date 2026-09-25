@@ -40,6 +40,11 @@ const connTitle = computed(() =>
     : 'Connect, launch or control the emulator',
 )
 
+/** Only operations running for at least this long show the busy indicator. */
+const BUSY_SHOW_MS = 1000
+
+const showBusy = computed(() => !!st.busy && st.busyMs >= BUSY_SHOW_MS)
+
 const busyLabel = computed(() =>
   st.busy ? `${st.busy.operation} ${Math.floor(st.busyMs / 1000)}s` : '',
 )
@@ -72,18 +77,22 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
         @click="open = !open"
       >
         <span class="inline-block h-2 w-2 rounded-full" :class="dotClass" />
-        <span data-testid="emulator-label">{{ emuLabel }}</span>
+        <span class="inline-block min-w-[14ch] text-left" data-testid="emulator-label">
+          {{ emuLabel }}
+        </span>
       </button>
       <ConnectPopover v-if="open" @close="open = false" />
     </div>
 
-    <span
-      v-if="st.busy"
-      class="font-mono text-xs text-dim"
-      :title="`The core is running ${st.busy.operation}; new operations wait or fail with BUSY`"
-      data-testid="busy-indicator"
-    >
-      {{ busyLabel }}
+    <!-- Fixed-width slot so the indicator never shifts the title or frame counter. -->
+    <span class="w-[18ch] shrink-0 truncate font-mono text-xs text-dim" data-testid="busy-slot">
+      <span
+        v-if="showBusy && st.busy"
+        :title="`The core is running ${st.busy.operation}; new operations wait or fail with BUSY`"
+        data-testid="busy-indicator"
+      >
+        {{ busyLabel }}
+      </span>
     </span>
 
     <span class="flex items-center gap-1" :title="st.game?.romPath">
@@ -92,12 +101,20 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
       <span v-if="st.game?.code" class="font-mono text-dim" data-testid="game-code">
         [{{ st.game.code }}]
       </span>
-      <span v-if="st.game?.state === 'paused'" class="text-warn">paused</span>
+      <span
+        class="text-warn"
+        :class="{ invisible: st.game?.state !== 'paused' }"
+        :aria-hidden="st.game?.state !== 'paused'"
+      >
+        paused
+      </span>
     </span>
 
     <span class="flex items-center gap-1">
       <span class="lbl">frame</span>
-      <span class="min-w-16 font-mono" data-testid="frame-counter">{{ st.frame }}</span>
+      <span class="inline-block min-w-[9ch] font-mono tabular-nums" data-testid="frame-counter">{{
+        st.frame
+      }}</span>
     </span>
 
     <span class="flex-1" />

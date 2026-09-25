@@ -166,6 +166,36 @@ describe('TopBar', () => {
 describe('TopBar busy / unresponsive', () => {
   afterEach(() => vi.useRealTimers())
 
+  it('hides the busy indicator for operations shorter than 1 s', async () => {
+    vi.useFakeTimers()
+    mockFetch({})
+    const st = useStatusStore()
+    st.set(statusFixture())
+    const w = mount(TopBar)
+    expect(w.find(tid('busy-slot')).exists()).toBe(true)
+
+    st.set(statusFixture({ busy: { operation: 'blast', sinceMs: 0 } }))
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).exists()).toBe(false)
+    expect(w.find(tid('busy-slot')).exists()).toBe(true)
+    expect(w.find(tid('manual-blast')).attributes('disabled')).toBeDefined()
+
+    vi.advanceTimersByTime(999)
+    st.tick()
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).exists()).toBe(false)
+
+    vi.advanceTimersByTime(1)
+    st.tick()
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).text()).toBe('blast 1s')
+
+    st.set(statusFixture())
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).exists()).toBe(false)
+    expect(w.find(tid('busy-slot')).exists()).toBe(true)
+  })
+
   it('shows the busy operation with elapsed seconds and disables operations', async () => {
     vi.useFakeTimers()
     mockFetch({})

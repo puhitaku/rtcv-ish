@@ -36,9 +36,14 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
   core-host directories via `/api/browse`), game name and frame counter,
   the two global actions Manual Blast and Auto-Corrupt toggle, theme
   toggle. Game Protection: toggle + Back + Last + Now.
-- Stuck emulator: while `Status.busy` is set, a small monospace
-  `<operation> <seconds>s` sits next to the connection status (elapsed
-  time ticks locally from `sinceMs`). When `Status.unresponsive` is true
+- Stuck emulator: once `Status.busy` has been set for at least 1 s
+  (elapsed time ticks locally from `sinceMs`), a small monospace
+  `<operation> <seconds>s` appears next to the connection status, so fast
+  operations such as a manual blast never show it. It sits in a
+  fixed-width slot, the connection label has a minimum width, the
+  "paused" marker keeps its space while hidden and the frame counter uses
+  tabular digits with a minimum width, so the game title and frame
+  counter never move on status changes. When `Status.unresponsive` is true
   the connection chip turns the warning color, reads "unresponsive" and
   its tooltip says the emulator stopped answering. In the popover,
   Disconnect and Quit stay clickable while connected, even when busy or
