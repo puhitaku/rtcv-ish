@@ -78,7 +78,10 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunBadFlags(t *testing.T) {
-	for _, args := range [][]string{{"--log-format", "xml"}, {"--nope"}, {"extra"}} {
+	for _, args := range [][]string{
+		{"--log-format", "xml"}, {"--nope"}, {"extra"},
+		{"--data-dir", t.TempDir(), "--melonds", "/nonexistent/melonDS"},
+	} {
 		if err := run(t.Context(), args, io.Discard, io.Discard); err == nil {
 			t.Errorf("run(%v) succeeded", args)
 		}

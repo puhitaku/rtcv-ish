@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/puhitaku/rtcv-ish/internal/emulators"
 	"github.com/puhitaku/rtcv-ish/internal/logging"
 	"github.com/puhitaku/rtcv-ish/internal/server"
 	"github.com/puhitaku/rtcv-ish/internal/webui"
@@ -41,7 +42,11 @@ type config struct {
 	emulator  string
 	seed      int64
 	logFormat string
+	melonDS   string
 }
+
+// melonDSEnv sets the default of --melonds; the e2e tests use it too.
+const melonDSEnv = "RTCVISH_MELONDS"
 
 func parseFlags(args []string, output io.Writer) (*config, error) {
 	var cfg config
@@ -52,6 +57,7 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	fs.StringVar(&cfg.emulator, "emulator", "", "emulator API address to connect to at start")
 	fs.Int64Var(&cfg.seed, "seed", 0, "random seed (0: time-based)")
 	fs.StringVar(&cfg.logFormat, "log-format", logging.FormatAuto, "log format: auto, text or json")
+	fs.StringVar(&cfg.melonDS, "melonds", os.Getenv(melonDSEnv), "melonDS executable or .app bundle to launch (env "+melonDSEnv+")")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -86,11 +92,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	log.Info("starting", "data_dir", cfg.dataDir, "seed", cfg.seed)
 
+	specs, err := launchableEmulators(cfg.melonDS, log)
+	if err != nil {
+		return err
+	}
+
 	core, err := server.New(ctx, server.Config{
 		DataDir:   cfg.dataDir,
 		Seed:      cfg.seed,
 		Logger:    log,
-		Emulators: bundledEmulators(log),
+		Emulators: specs,
 	}, server.WithStatic(webui.FS()))
 	if err != nil {
 		return err
@@ -132,44 +143,39 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return core.Close()
 }
 
-// melonDSArgs makes a bundled melonDS listen on the port the core picks.
+// melonDSArgs makes a launched melonDS listen on the port the core picks.
 var melonDSArgs = []string{"--rtcvish-listen", "127.0.0.1:{port}"}
 
-// bundledEmulators lists the emulators shipped next to the executable in
-// emulators/<name>.
-func bundledEmulators(log *slog.Logger) []server.EmulatorSpec {
-	exe, err := os.Executable()
-	if err != nil {
+// launchableEmulators lists the emulators the core can launch. override is
+// an explicit melonDS path; otherwise the bundle next to the executable
+// and then a development build in the repository are used.
+func launchableEmulators(override string, log *slog.Logger) ([]server.EmulatorSpec, error) {
+	var exeDir string
+	if exe, err := os.Executable(); err != nil {
 		log.Warn("cannot locate executable; no bundled emulators", "err", err)
-		return nil
-	}
-	if p, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = p
-	}
-	dir := filepath.Join(filepath.Dir(exe), "emulators", "melonds")
-	return []server.EmulatorSpec{{Name: "melonDS", Path: melonDSPath(dir), Args: melonDSArgs}}
-}
-
-// melonDSPath returns the melonDS executable in dir for this OS. When
-// none exists it returns the preferred path, reported as not present.
-func melonDSPath(dir string) string {
-	var candidates []string
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = []string{filepath.Join(dir, "melonDS.app", "Contents", "MacOS", "melonDS")}
-	case "windows":
-		candidates = []string{filepath.Join(dir, "melonDS.exe")}
-	case "linux":
-		images, _ := filepath.Glob(filepath.Join(dir, "melonDS*.AppImage"))
-		candidates = images
-	}
-	candidates = append(candidates, filepath.Join(dir, "melonDS"))
-	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			return c
+	} else {
+		if p, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = p
 		}
+		exeDir = filepath.Dir(exe)
 	}
-	return candidates[0]
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Debug("cannot get working directory", "err", err)
+	}
+	path, source, err := emulators.FindMelonDS(runtime.GOOS, cwd, exeDir, override, log)
+	if err != nil {
+		return nil, fmt.Errorf("--melonds/%s: %w", melonDSEnv, err)
+	}
+	if source == emulators.SourceNone {
+		log.Info("melonDS not found; Launch is disabled", "path", path)
+	} else {
+		log.Info("using melonDS", "source", source, "path", path)
+	}
+	if path == "" {
+		return nil, nil
+	}
+	return []server.EmulatorSpec{{Name: "melonDS", Path: path, Args: melonDSArgs}}, nil
 }
 
 func browserURL(addr net.Addr) string {

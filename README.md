@@ -37,6 +37,7 @@ Core flags:
 | `--emulator` | none | Emulator API address to connect to at start |
 | `--seed` | `0` (time-based) | Random seed |
 | `--log-format` | `auto` | Log format: `auto`, `text` or `json` |
+| `--melonds` | `$RTCVISH_MELONDS` | melonDS executable or `.app` bundle to launch. Without it, the bundled `emulators/melonds/` next to the executable is used, then the newest `emulators/melonds/build/*/` when run from the repository |
 
 ## Build from source
 
