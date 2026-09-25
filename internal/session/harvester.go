@@ -558,23 +558,32 @@ func (s *Session) backupLocked(ctx context.Context) error {
 
 // ProtectionBack loads the most recent backup and drops it.
 func (s *Session) ProtectionBack(ctx context.Context) error {
-	return s.withOp(ctx, func(ctx context.Context) error {
-		c, err := s.clientLocked()
-		if err != nil {
-			return err
-		}
-		k := s.store.LatestBackup()
-		if k == nil {
-			return errorf(KindNoBackup, "no game protection backup")
-		}
-		if err := s.loadStateLocked(ctx, c, k.ParentKey); err != nil {
-			return err
-		}
+	return s.withOp(ctx, func(ctx context.Context) error { return s.loadLatestBackupLocked(ctx, true) })
+}
+
+// ProtectionLast loads the most recent backup and keeps it.
+func (s *Session) ProtectionLast(ctx context.Context) error {
+	return s.withOp(ctx, func(ctx context.Context) error { return s.loadLatestBackupLocked(ctx, false) })
+}
+
+func (s *Session) loadLatestBackupLocked(ctx context.Context, drop bool) error {
+	c, err := s.clientLocked()
+	if err != nil {
+		return err
+	}
+	k := s.store.LatestBackup()
+	if k == nil {
+		return errorf(KindNoBackup, "no game protection backup")
+	}
+	if err := s.loadStateLocked(ctx, c, k.ParentKey); err != nil {
+		return err
+	}
+	if drop {
 		s.store.DropLatestBackup()
-		s.lastBackup = time.Now()
-		s.publishStatusLocked()
-		return nil
-	})
+	}
+	s.lastBackup = time.Now()
+	s.publishStatusLocked()
+	return nil
 }
 
 // protectionLoop takes a backup every gameProtection.intervalSeconds while

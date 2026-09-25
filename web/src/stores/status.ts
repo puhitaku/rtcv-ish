@@ -78,6 +78,10 @@ export const useStatusStore = defineStore('status', () => {
     await call(client.POST('/protection/back'))
   }
 
+  async function protectionLast() {
+    await call(client.POST('/protection/last'))
+  }
+
   return {
     status,
     frame,
@@ -102,5 +106,6 @@ export const useStatusStore = defineStore('status', () => {
     quit,
     protectionNow,
     protectionBack,
+    protectionLast,
   }
 })

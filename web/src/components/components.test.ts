@@ -3,8 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import EnginePanel from './panels/EnginePanel.vue'
 import SavestateManager from './harvester/SavestateManager.vue'
+import TopBar from './TopBar.vue'
 import { mockFetch } from '@/test/fetch'
 import { settingsFixture, statusFixture } from '@/test/fixtures'
+import { useLogStore } from '@/stores/log'
 import { deepMerge, useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
@@ -136,5 +138,26 @@ describe('SavestateManager', () => {
     expect(w.find(tid('slot-page')).text()).toBe('5 / 5')
     expect(w.find(tid('slot-50')).exists()).toBe(true)
     expect(w.find(tid('slot-page-next')).attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('TopBar', () => {
+  it('loads the last backup without dropping it', async () => {
+    const { calls } = mockFetch({ 'POST /api/protection/last': () => undefined })
+    const st = useStatusStore()
+    st.set(statusFixture())
+    const w = mount(TopBar)
+
+    const last = w.find(tid('protection-last'))
+    expect(last.attributes('disabled')).toBeDefined()
+    expect(last.attributes('title')).toBe('No backups yet')
+
+    st.set(statusFixture({ protectionBackups: 2 }))
+    await flushPromises()
+    expect(last.attributes('disabled')).toBeUndefined()
+    await last.trigger('click')
+    await flushPromises()
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/protection/last'])
+    expect(useLogStore().entries.at(-1)?.msg).toBe('game protection: loaded last backup')
   })
 })

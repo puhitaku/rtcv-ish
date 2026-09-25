@@ -123,6 +123,20 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
       </button>
       <button
         class="btn"
+        :disabled="!!st.needRom || !st.status?.protectionBackups"
+        :title="
+          st.needRom ||
+          (!st.status?.protectionBackups
+            ? 'No backups yet'
+            : 'Load the most recent backup and keep it')
+        "
+        data-testid="protection-last"
+        @click="act(() => st.protectionLast(), 'game protection: loaded last backup')"
+      >
+        Last
+      </button>
+      <button
+        class="btn"
         :disabled="!!st.needRom"
         :title="st.needRom || 'Take a backup now'"
         data-testid="protection-now"

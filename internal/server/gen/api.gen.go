@@ -1415,6 +1415,12 @@ type ClientInterface interface {
 	// Take a game protection backup now (savestate kept in memory, at most `gameProtection.keep`).
 	ProtectionBackup(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ProtectionLast performs a POST /protection/last (the `ProtectionLast` operationId) request.
+	//
+	// Load the most recent backup without dropping it, so the same state
+	// can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+	ProtectionLast(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSavestates performs a GET /savestates (the `ListSavestates` operationId) request.
 	ListSavestates(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2216,6 +2222,22 @@ func (c *Client) ProtectionBack(ctx context.Context, reqEditors ...RequestEditor
 // Take a game protection backup now (savestate kept in memory, at most `gameProtection.keep`).
 func (c *Client) ProtectionBackup(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewProtectionBackupRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ProtectionLast performs a POST /protection/last (the `ProtectionLast` operationId) request.
+//
+// Load the most recent backup without dropping it, so the same state
+// can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+func (c *Client) ProtectionLast(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProtectionLastRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -3894,6 +3916,33 @@ func NewProtectionBackupRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewProtectionLastRequest constructs an http.Request for the ProtectionLast method
+func NewProtectionLastRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/protection/last")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListSavestatesRequest constructs an http.Request for the ListSavestates method
 func NewListSavestatesRequest(server string) (*http.Request, error) {
 	var err error
@@ -5406,6 +5455,14 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ProtectionBackupWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ProtectionBackupResponse, error)
+
+	// ProtectionLastWithResponse performs a POST /protection/last (the `ProtectionLast` operationId) request.
+	//
+	// Load the most recent backup without dropping it, so the same state
+	// can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ProtectionLastWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ProtectionLastResponse, error)
 
 	// ListSavestatesWithResponse performs a GET /savestates (the `ListSavestates` operationId) request.
 	//
@@ -7169,6 +7226,52 @@ func (r ProtectionBackupResponse) Bytes() []byte {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ProtectionBackupResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ProtectionLastResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ProtectionLastResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ProtectionLastResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ProtectionLastResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProtectionLastResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// Bytes is a convenience method to retrieve the raw bytes from the HTTP response
+func (r ProtectionLastResponse) Bytes() []byte {
+	return r.Body
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ProtectionLastResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9343,6 +9446,20 @@ func (c *ClientWithResponses) ProtectionBackupWithResponse(ctx context.Context, 
 	return ParseProtectionBackupResponse(rsp)
 }
 
+// ProtectionLastWithResponse performs a POST /protection/last (the `ProtectionLast` operationId) request.
+//
+// Load the most recent backup without dropping it, so the same state
+// can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ProtectionLastWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ProtectionLastResponse, error) {
+	rsp, err := c.ProtectionLast(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProtectionLastResponse(rsp)
+}
+
 // ListSavestatesWithResponse performs a GET /savestates (the `ListSavestates` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -10830,6 +10947,35 @@ func ParseProtectionBackupResponse(rsp *http.Response) (*ProtectionBackupRespons
 	return response, nil
 }
 
+// ParseProtectionLastResponse parses an HTTP response from a ProtectionLastWithResponse call
+func ParseProtectionLastResponse(rsp *http.Response) (*ProtectionLastResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProtectionLastResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListSavestatesResponse parses an HTTP response from a ListSavestatesWithResponse call
 func ParseListSavestatesResponse(rsp *http.Response) (*ListSavestatesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11975,6 +12121,9 @@ type ServerInterface interface {
 	// (POST /protection/backup)
 	ProtectionBackup(w http.ResponseWriter, r *http.Request)
 
+	// (POST /protection/last)
+	ProtectionLast(w http.ResponseWriter, r *http.Request)
+
 	// (GET /savestates)
 	ListSavestates(w http.ResponseWriter, r *http.Request)
 
@@ -12565,6 +12714,20 @@ func (siw *ServerInterfaceWrapper) ProtectionBackup(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ProtectionBackup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ProtectionLast operation middleware
+func (siw *ServerInterfaceWrapper) ProtectionLast(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ProtectionLast(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13437,6 +13600,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/stockpile/{key}/layer", wrapper.PutStockpileLayer)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/protection/backup", wrapper.ProtectionBackup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/protection/back", wrapper.ProtectionBack)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/protection/last", wrapper.ProtectionLast)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/browse", wrapper.Browse)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/lists", wrapper.ListLists)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/lists", wrapper.UploadList)
@@ -14511,6 +14675,38 @@ type ProtectionBackupdefaultJSONResponse struct {
 }
 
 func (response ProtectionBackupdefaultJSONResponse) VisitProtectionBackupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProtectionLastRequestObject struct {
+}
+
+type ProtectionLastResponseObject interface {
+	VisitProtectionLastResponse(w http.ResponseWriter) error
+}
+
+type ProtectionLast204Response struct {
+}
+
+func (response ProtectionLast204Response) VisitProtectionLastResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ProtectionLastdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ProtectionLastdefaultJSONResponse) VisitProtectionLastResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -15852,6 +16048,9 @@ type StrictServerInterface interface {
 	// (POST /protection/backup)
 	ProtectionBackup(ctx context.Context, request ProtectionBackupRequestObject) (ProtectionBackupResponseObject, error)
 
+	// (POST /protection/last)
+	ProtectionLast(ctx context.Context, request ProtectionLastRequestObject) (ProtectionLastResponseObject, error)
+
 	// (GET /savestates)
 	ListSavestates(ctx context.Context, request ListSavestatesRequestObject) (ListSavestatesResponseObject, error)
 
@@ -16759,6 +16958,30 @@ func (sh *strictHandler) ProtectionBackup(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ProtectionBackupResponseObject); ok {
 		if err := validResponse.VisitProtectionBackupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ProtectionLast operation middleware
+func (sh *strictHandler) ProtectionLast(w http.ResponseWriter, r *http.Request) {
+	var request ProtectionLastRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ProtectionLast(ctx, request.(ProtectionLastRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ProtectionLast")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ProtectionLastResponseObject); ok {
+		if err := validResponse.VisitProtectionLastResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -17815,32 +18038,33 @@ var swaggerSpec = []string{
 	"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",
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

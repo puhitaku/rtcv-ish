@@ -833,6 +833,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/protection/last": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description Load the most recent backup without dropping it, so the same state
+         *     can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+         */
+        post: operations["protectionLast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/browse": {
         parameters: {
             query?: never;
@@ -2761,6 +2781,25 @@ export interface operations {
         };
     };
     protectionBack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Loaded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    protectionLast: {
         parameters: {
             query?: never;
             header?: never;

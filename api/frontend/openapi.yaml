@@ -879,6 +879,17 @@ paths:
         "204": { description: Loaded. }
         default: { $ref: "#/components/responses/Error" }
 
+  /protection/last:
+    post:
+      operationId: protectionLast
+      tags: [protection]
+      description: |
+        Load the most recent backup without dropping it, so the same state
+        can be reloaded repeatedly. 409 `NO_BACKUP` when there is none.
+      responses:
+        "204": { description: Loaded. }
+        default: { $ref: "#/components/responses/Error" }
+
   /browse:
     get:
       operationId: browse

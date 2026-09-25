@@ -467,6 +467,13 @@ func (a *api) ProtectionBack(ctx context.Context, _ gen.ProtectionBackRequestObj
 	return gen.ProtectionBack204Response{}, nil
 }
 
+func (a *api) ProtectionLast(ctx context.Context, _ gen.ProtectionLastRequestObject) (gen.ProtectionLastResponseObject, error) {
+	if err := a.s.sess.ProtectionLast(ctx); err != nil {
+		return nil, err
+	}
+	return gen.ProtectionLast204Response{}, nil
+}
+
 // ---- Lists ----
 
 func (a *api) ListLists(ctx context.Context, _ gen.ListListsRequestObject) (gen.ListListsResponseObject, error) {

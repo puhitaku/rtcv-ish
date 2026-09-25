@@ -372,6 +372,41 @@ func TestProtection(t *testing.T) {
 	expectError(t, r, err, http.StatusConflict, "NO_BACKUP")
 }
 
+func TestProtectionLast(t *testing.T) {
+	e := newEnv(t, envOptions{})
+
+	r, err := e.c.ProtectionLastWithResponse(e.ctx)
+	expectError(t, r, err, http.StatusConflict, "NO_BACKUP")
+
+	e.writeMem(vram, probe, "aaaaaaaa")
+	rb, err := e.c.ProtectionBackupWithResponse(e.ctx)
+	expectStatus(t, rb, err, http.StatusNoContent)
+
+	for i, dirty := range []string{"bbbbbbbb", "cccccccc"} {
+		e.writeMem(vram, probe, dirty)
+		r, err := e.c.ProtectionLastWithResponse(e.ctx)
+		expectStatus(t, r, err, http.StatusNoContent)
+		if got := e.readMem(vram, probe, 4); got != "aaaaaaaa" {
+			t.Errorf("after last #%d: %s, want aaaaaaaa", i+1, got)
+		}
+		if n := e.status().ProtectionBackups; n != 1 {
+			t.Errorf("after last #%d: protectionBackups = %d, want 1", i+1, n)
+		}
+	}
+
+	e.writeMem(vram, probe, "dddddddd")
+	rback, err := e.c.ProtectionBackWithResponse(e.ctx)
+	expectStatus(t, rback, err, http.StatusNoContent)
+	if got := e.readMem(vram, probe, 4); got != "aaaaaaaa" {
+		t.Errorf("after back: %s, want aaaaaaaa", got)
+	}
+	if n := e.status().ProtectionBackups; n != 0 {
+		t.Errorf("after back: protectionBackups = %d, want 0", n)
+	}
+	r, err = e.c.ProtectionLastWithResponse(e.ctx)
+	expectError(t, r, err, http.StatusConflict, "NO_BACKUP")
+}
+
 func distinctUnits(us []gen.Unit) []gen.Unit {
 	var out []gen.Unit
 	for _, u := range us {

@@ -130,6 +130,7 @@ Savestate blobs are stored as files in `data/states/<key>.state`.
 |---|---|---|
 | POST | `/api/protection/backup` | Take a backup now. |
 | POST | `/api/protection/back` | Load the most recent backup and drop it. |
+| POST | `/api/protection/last` | Load the most recent backup and keep it. |
 
 ### Lists
 
