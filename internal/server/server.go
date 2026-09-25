@@ -17,9 +17,6 @@ import (
 	"github.com/puhitaku/rtcv-ish/internal/session"
 )
 
-// Version is reported in Status.version.
-var Version = "dev"
-
 // EmulatorSpec is a bundled emulator the core can launch.
 type EmulatorSpec = session.EmulatorSpec
 
@@ -28,6 +25,8 @@ type Config struct {
 	Seed      int64
 	Logger    *slog.Logger
 	Emulators []EmulatorSpec
+	// Version is reported in Status.version; empty means "dev".
+	Version string
 }
 
 // Option configures New.
@@ -55,13 +54,16 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
+	if cfg.Version == "" {
+		cfg.Version = "dev"
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	sess, err := session.New(ctx, session.Config{
 		DataDir:   cfg.DataDir,
 		Seed:      cfg.Seed,
 		Logger:    cfg.Logger,
 		Emulators: cfg.Emulators,
-		Version:   Version,
+		Version:   cfg.Version,
 	})
 	if err != nil {
 		cancel()

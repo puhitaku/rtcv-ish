@@ -49,6 +49,7 @@ type envOptions struct {
 	noROM     bool
 	fake      fake.Options
 	emulators []server.EmulatorSpec
+	version   string
 	opts      []server.Option
 }
 
@@ -90,6 +91,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 		Seed:      o.seed,
 		Logger:    log,
 		Emulators: o.emulators,
+		Version:   o.version,
 	}, o.opts...)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

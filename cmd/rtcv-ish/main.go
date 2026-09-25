@@ -105,6 +105,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		Seed:      cfg.seed,
 		Logger:    log,
 		Emulators: specs,
+		Version:   version,
 	}, server.WithStatic(webui.FS()))
 	if err != nil {
 		return err

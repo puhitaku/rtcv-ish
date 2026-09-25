@@ -14,6 +14,9 @@ import (
 )
 
 func TestRun(t *testing.T) {
+	defer func(v string) { version = v }(version)
+	version = "test-1"
+
 	emulator, err := fake.New(fake.Options{Manual: true})
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +67,17 @@ func TestRun(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "rtcv-ish") {
 		t.Errorf("GET / = %d %q", resp.StatusCode, body)
+	}
+
+	resp, err = http.Get(url + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct{ Version string }
+	err = json.NewDecoder(resp.Body).Decode(&st)
+	resp.Body.Close()
+	if err != nil || st.Version != "test-1" {
+		t.Errorf("GET /api/status: version %q (err %v), want %q", st.Version, err, "test-1")
 	}
 
 	cancel()

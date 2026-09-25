@@ -36,6 +36,18 @@ func TestStatusDisconnected(t *testing.T) {
 	}
 }
 
+func TestStatusVersion(t *testing.T) {
+	for _, tc := range []struct{ configured, want string }{
+		{"", "dev"},
+		{"v1.2.3", "v1.2.3"},
+	} {
+		e := newEnv(t, envOptions{noConnect: true, version: tc.configured})
+		if got := e.status().Version; got != tc.want {
+			t.Errorf("Config.Version %q: status version = %q, want %q", tc.configured, got, tc.want)
+		}
+	}
+}
+
 // Operations that need an emulator fail with 503 EMULATOR_DISCONNECTED
 // while none is connected; core-only resources keep working.
 func TestDisconnectedErrors(t *testing.T) {
