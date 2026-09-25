@@ -1,0 +1,31 @@
+# nanopb options for api/emulator/v1/emulator.proto.
+# Every string, bytes and repeated field is heap-allocated (requires
+# PB_ENABLE_MALLOC); payloads such as savestates are large.
+rtcvish.emulator.v1.Error.message type:FT_POINTER
+rtcvish.emulator.v1.HelloRequest.client_name type:FT_POINTER
+rtcvish.emulator.v1.HelloResponse.emulator type:FT_POINTER
+rtcvish.emulator.v1.HelloResponse.version type:FT_POINTER
+rtcvish.emulator.v1.HelloResponse.system type:FT_POINTER
+rtcvish.emulator.v1.Status.rom_path type:FT_POINTER
+rtcvish.emulator.v1.Status.game_title type:FT_POINTER
+rtcvish.emulator.v1.Status.game_code type:FT_POINTER
+rtcvish.emulator.v1.Status.console type:FT_POINTER
+rtcvish.emulator.v1.Domain.name type:FT_POINTER
+rtcvish.emulator.v1.ListDomainsResponse.domains type:FT_POINTER
+rtcvish.emulator.v1.Range.domain type:FT_POINTER
+rtcvish.emulator.v1.ReadRequest.ranges type:FT_POINTER
+rtcvish.emulator.v1.ReadResponse.data type:FT_POINTER
+rtcvish.emulator.v1.WriteChunk.domain type:FT_POINTER
+rtcvish.emulator.v1.WriteChunk.data type:FT_POINTER
+rtcvish.emulator.v1.WriteRequest.chunks type:FT_POINTER
+rtcvish.emulator.v1.SaveStateResponse.data type:FT_POINTER
+rtcvish.emulator.v1.LoadStateRequest.data type:FT_POINTER
+rtcvish.emulator.v1.LoadRomRequest.path type:FT_POINTER
+rtcvish.emulator.v1.Unit.domain type:FT_POINTER
+rtcvish.emulator.v1.Unit.value type:FT_POINTER
+rtcvish.emulator.v1.StoreSource.domain type:FT_POINTER
+rtcvish.emulator.v1.ApplyUnitsRequest.units type:FT_POINTER
+rtcvish.emulator.v1.RemoveUnitsRequest.ids type:FT_POINTER
+rtcvish.emulator.v1.ListUnitsResponse.units type:FT_POINTER
+rtcvish.emulator.v1.Image.rgba type:FT_POINTER
+rtcvish.emulator.v1.ScreenshotResponse.screens type:FT_POINTER

@@ -1,0 +1,3 @@
+# Generated and vendored code keeps its upstream formatting.
+rtcvish/emulator.pb.*
+rtcvish/nanopb/*
