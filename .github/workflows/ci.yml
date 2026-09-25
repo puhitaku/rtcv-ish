@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        if: hashFiles('web/package.json') != ''
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build and test the web frontend
+        if: hashFiles('web/package.json') != ''
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npm test --if-present
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [[ -n $unformatted ]]; then
+            echo "::error::Files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go test
+        run: go test ./...
