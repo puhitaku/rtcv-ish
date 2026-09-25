@@ -31,7 +31,10 @@ dependencies inside the emulator build.
   `LoadRom`).
 - `Event`s are pushed by the emulator at any time and carry no `id`.
 - The first request must be `Hello`. `protocol_version` is 1. The emulator
-  rejects other versions with `UNSUPPORTED`.
+  rejects other versions with `UNSUPPORTED` and any other request sent
+  before `Hello` with `INVALID_ARGUMENT`.
+- `Capabilities.max_payload` is at most the 64 MiB frame cap and must be
+  large enough for a savestate (melonDS reports 64 MiB).
 - Any request that violates the schema or the state machine yields an
   `Error` response; the connection stays open. A malformed frame closes
   the connection.
@@ -63,10 +66,10 @@ dependencies inside the emulator build.
 | `LoadState` | Restore from bytes. Scheduled units are left untouched. | `NO_ROM`, `INVALID_ARGUMENT` (bad blob) |
 | `LoadRom` | Load a ROM by path and start running. Replies when the game is running. Clears scheduled units, resets the frame counter. | `NOT_FOUND`, `FAILED` |
 | `CloseRom` | Stop emulation, unload the ROM. Clears units. | |
-| `Reset` | Hard reset the console. Clears units, resets the frame counter. | `NO_ROM` |
+| `Reset` | Hard reset the console. Clears units, resets the frame counter, keeps the running/paused state. | `NO_ROM` |
 | `Pause` / `Resume` | Pause or resume emulation. Idempotent. | `NO_ROM` |
 | `Step` | Pause, emulate N frames, reply with the frame counter. | `NO_ROM`, `INVALID_ARGUMENT` (N == 0) |
-| `ApplyUnits` | Schedule units. Ids must be unique among live units. | `NOT_FOUND`, `OUT_OF_RANGE`, `INVALID_ARGUMENT` |
+| `ApplyUnits` | Schedule units. Ids must be unique among live units. The whole batch is validated before any unit is scheduled. | `NO_ROM`, `NOT_FOUND`, `OUT_OF_RANGE`, `INVALID_ARGUMENT` |
 | `RemoveUnits` | Remove units by id. Unknown ids are ignored. | |
 | `ClearUnits` | Remove all units. | |
 | `ListUnits` | Units that are queued or executing. | |
@@ -105,6 +108,12 @@ Units implement RTCV's StepActions with a smaller model. For each frame
 A unit with `lifetime=0` never expires. The core enforces RTCV's
 "max infinite units" limit by removing the oldest ids itself.
 
+Timing, precisely: a unit applied with `delay=N` is skipped for the next
+N frames and first writes right before frame N+1. So after `Step(N)` the
+write is not visible yet, after `Step(N+1)` it is. A store unit reads its
+source at the moment it writes (continuous) or when it first executes
+(once), so writes by earlier units in the same frame are visible to it.
+
 ## Memory domains for melonDS
 
 Little-endian throughout. `hidden` marks domains RTCV blacklisted.
@@ -129,6 +138,8 @@ Right=4, Left=5, Up=6, Down=7, R=8, L=9, X=10, Y=11 (1 = pressed).
 
 - `--rtcvish-listen HOST:PORT` starts the API server. Without it the
   emulator behaves like upstream.
+- `--rtcvish-config-dir DIR` uses DIR as the config/emu directory instead
+  of the default, so tests can run with a private `melonDS.toml`.
 - The existing positional ROM argument may be used to boot a ROM at start.
 
 ## C++ SDK (`sdk/cpp`)

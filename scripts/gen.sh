@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Regenerates all generated code. Generated files are committed.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+bin="$(mktemp -d)"
+trap 'rm -rf "$bin"' EXIT
+
+gen_emulator_go() {
+	go build -o "$bin/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
+	protoc \
+		--plugin=protoc-gen-go="$bin/protoc-gen-go" \
+		--proto_path=api \
+		--go_out=. \
+		--go_opt=module=github.com/puhitaku/rtcv-ish \
+		api/emulator/v1/emulator.proto
+}
+
+gen_emulator_go
