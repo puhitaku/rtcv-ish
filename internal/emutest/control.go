@@ -1,6 +1,7 @@
 package emutest
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -114,11 +115,16 @@ func RunControl(t *testing.T, c *emu.Client, s Scratch) {
 		if len(units) != 0 {
 			t.Errorf("Reset left %d units", len(units))
 		}
-		NextEvent(t, c, EventTimeout, "StatusEvent after Reset", func(ev *emulatorv1.Event) bool { return ev.GetStatus() != nil })
-		ev := NextEvent(t, c, EventTimeout, "FrameEvent after Reset", isFrame)
-		if f := ev.GetFrame().GetFrame(); f >= before {
-			t.Errorf("FrameEvent %d after Reset, want < %d", f, before)
-		}
+		// Drain is best-effort, and events emitted before the Reset (the
+		// Resume StatusEvent, frame events) may still be queued or in flight.
+		// Skip them: wait for the post-reset StatusEvent, then for a frame
+		// event from the restarted counter.
+		NextEvent(t, c, EventTimeout, "StatusEvent after Reset", func(ev *emulatorv1.Event) bool {
+			return ev.GetStatus() != nil && ev.GetStatus().GetStatus().GetFrame() < before
+		})
+		NextEvent(t, c, EventTimeout, fmt.Sprintf("FrameEvent < %d after Reset", before), func(ev *emulatorv1.Event) bool {
+			return ev.GetFrame() != nil && ev.GetFrame().GetFrame() < before
+		})
 		must(t, c.Pause(ctx), "Pause")
 	})
 }
