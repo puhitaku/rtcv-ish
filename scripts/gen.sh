@@ -23,5 +23,10 @@ gen_frontend_go() {
 	go tool oapi-codegen -config api/frontend/oapi-codegen.yaml api/frontend/openapi.yaml
 }
 
+gen_frontend_ts() {
+	(cd web && npx --no-install openapi-typescript ../api/frontend/openapi.yaml -o src/api/schema.d.ts)
+}
+
 gen_emulator_go
 gen_frontend_go
+gen_frontend_ts

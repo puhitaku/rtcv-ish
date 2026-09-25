@@ -1,0 +1,4 @@
+node_modules
+src/api/schema.d.ts
+test-results
+playwright-report
