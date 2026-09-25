@@ -107,6 +107,10 @@ func (s *Session) Connect(ctx context.Context, addr string) (Status, error) {
 // setupConnLocked subscribes to frame events, reads the game status and
 // starts the event loop.
 func (s *Session) setupConnLocked(ctx context.Context, c *emu.Client, addr string, proc *process) error {
+	if err := s.ctx.Err(); err != nil {
+		c.Close()
+		return &Error{Kind: KindConnectFailed, Msg: "session is closed", Err: err}
+	}
 	cn := &conn{client: c, addr: addr, info: infoFromHello(c.Info()), proc: proc}
 	if err := c.Subscribe(ctx, 1); err != nil {
 		c.Close()
@@ -145,7 +149,6 @@ func (s *Session) dropConnLocked() {
 func (s *Session) resetGameStateLocked() {
 	s.infinite = nil
 	s.blLayer, s.blBackup, s.blOn = nil, nil, false
-	s.autoCount = 0
 	s.store.ClearBackups()
 }
 
@@ -231,7 +234,12 @@ func dialRetry(ctx context.Context, addr string, proc *process, log *slog.Logger
 	}
 }
 
+// startProcess must be called with s.mu held so that Close, which cancels
+// s.ctx before taking s.mu, never misses the process or its goroutine.
 func (s *Session) startProcess(spec EmulatorSpec, port int) (*process, error) {
+	if err := s.ctx.Err(); err != nil {
+		return nil, err
+	}
 	args := make([]string, len(spec.Args))
 	for i, a := range spec.Args {
 		args[i] = strings.ReplaceAll(a, "{port}", strconv.Itoa(port))
@@ -248,7 +256,9 @@ func (s *Session) startProcess(spec EmulatorSpec, port int) (*process, error) {
 	s.procMu.Lock()
 	s.procs[p] = struct{}{}
 	s.procMu.Unlock()
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		err := cmd.Wait()
 		out.flush()
 		log.Info("emulator exited", "pid", cmd.Process.Pid, "status", cmd.ProcessState.String(), "err", err)
@@ -260,9 +270,10 @@ func (s *Session) startProcess(spec EmulatorSpec, port int) (*process, error) {
 	return p, nil
 }
 
+// kill kills the process without waiting for it to exit, so it is safe
+// under s.mu. Its wait goroutine reaps it and Close waits for that.
 func (s *Session) kill(p *process) {
 	p.cmd.Process.Kill()
-	<-p.exited
 }
 
 // stopProcesses waits briefly for launched emulators to exit and kills
@@ -283,6 +294,7 @@ func (s *Session) stopProcesses() {
 		}
 		s.log.Warn("killing emulator", "emulator", p.name, "pid", p.cmd.Process.Pid)
 		s.kill(p)
+		<-p.exited
 	}
 }
 
@@ -375,10 +387,17 @@ func (s *Session) onFrame(cn *conn, frame uint64) {
 	if !s.settings.AutoCorrupt {
 		return
 	}
-	if s.autoCount++; s.autoCount < s.settings.ErrorDelay {
+	// Frame events can be dropped, so count by the frame number. A frame
+	// before the marker means the counter went back (reset, savestate).
+	f := int64(frame)
+	if f < s.lastAutoFrame {
+		s.lastAutoFrame = f
 		return
 	}
-	s.autoCount = 0
+	if f-s.lastAutoFrame < int64(s.settings.ErrorDelay) {
+		return
+	}
+	s.lastAutoFrame = f
 	ctx, cancel := context.WithTimeout(s.ctx, opTimeout)
 	defer cancel()
 	if _, err := s.blastLocked(ctx, true); err != nil && s.ctx.Err() == nil {
@@ -424,6 +443,7 @@ func (s *Session) refreshGameLocked(ctx context.Context, force bool) error {
 	if !force {
 		s.resetGameStateLocked()
 	}
+	s.lastAutoFrame = s.game.Frame
 	var ds []*emulatorv1.Domain
 	if s.game.State != StateNoRom {
 		if ds, err = c.ListDomains(ctx); err != nil {
@@ -516,7 +536,8 @@ func (s *Session) Reset(ctx context.Context) (GameStatus, error) {
 			return err
 		}
 		s.infinite = nil
-		s.autoCount = 0
+		// The frame counter restarts at 0.
+		s.lastAutoFrame = 0
 		return nil
 	})
 }

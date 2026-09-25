@@ -67,7 +67,7 @@ func (s *Session) PatchSettings(patch []byte) (*corrupt.Settings, error) {
 		return nil, errorf(KindInvalid, "settings: %v", err)
 	}
 	if st.AutoCorrupt && !s.settings.AutoCorrupt {
-		s.autoCount = 0
+		s.lastAutoFrame = s.game.Frame
 	}
 	s.settings = st
 	if err := s.saveSettingsLocked(); err != nil {

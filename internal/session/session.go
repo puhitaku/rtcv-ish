@@ -73,9 +73,12 @@ type Session struct {
 	blLayer      *corrupt.Layer
 	blBackup     *corrupt.Layer
 	blOn         bool
-	autoCount    int
-	lastFrameEv  time.Time
-	lastBackup   time.Time
+	// lastAutoFrame is the emulator frame auto-corrupt counts errorDelay
+	// from: the frame it was enabled at, the game started at or it last
+	// blasted at.
+	lastAutoFrame int64
+	lastFrameEv   time.Time
+	lastBackup    time.Time
 }
 
 // New opens the data directory and starts background work. The session
