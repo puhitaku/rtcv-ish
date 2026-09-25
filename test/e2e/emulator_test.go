@@ -94,6 +94,7 @@ func TestLoadRom(t *testing.T) {
 }
 
 func TestBootFromCommandLine(t *testing.T) {
+	MelonDSPath(t) // skip before requiring the ROM
 	e := StartMelonDS(t, ROM(t, helloWorld))
 	ctx := testCtx(t)
 	deadline := time.Now().Add(15 * time.Second)
