@@ -25,6 +25,9 @@ import (
 
 const shutdownTimeout = 5 * time.Second
 
+// version is set at release build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -90,7 +93,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
-	log.Info("starting", "data_dir", cfg.dataDir, "seed", cfg.seed)
+	log.Info("starting", "version", version, "data_dir", cfg.dataDir, "seed", cfg.seed)
 
 	specs, err := launchableEmulators(cfg.melonDS, log)
 	if err != nil {
