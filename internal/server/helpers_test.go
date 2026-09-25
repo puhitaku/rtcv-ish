@@ -202,6 +202,9 @@ func (e *env) domains() []gen.Domain {
 
 func (e *env) selectDomains(names ...string) {
 	e.t.Helper()
+	if names == nil {
+		names = []string{} // the spec requires an array, not null
+	}
 	r, err := e.c.SetSelectedDomainsWithResponse(e.ctx, gen.NamesRequest{Names: names})
 	expectStatus(e.t, r, err, http.StatusOK)
 }

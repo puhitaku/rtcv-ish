@@ -10,6 +10,7 @@ import (
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/server/gen"
+	"github.com/puhitaku/rtcv-ish/internal/session"
 )
 
 // Error codes returned in gen.Error.Code. Emulator error codes are passed
@@ -43,10 +44,21 @@ func newError(status int, code, format string, args ...any) *apiError {
 	return &apiError{Status: status, Code: code, Msg: fmt.Sprintf(format, args...)}
 }
 
-var (
-	errNotImplemented = newError(http.StatusNotImplemented, CodeNotImplemented, "not implemented")
-	errDisconnected   = newError(http.StatusServiceUnavailable, CodeEmulatorDisconnected, "no emulator connected")
-)
+var errDisconnected = newError(http.StatusServiceUnavailable, CodeEmulatorDisconnected, "no emulator connected")
+
+var sessionCodes = map[session.Kind]struct {
+	status int
+	code   string
+}{
+	session.KindInvalid:          {http.StatusBadRequest, CodeInvalidArgument},
+	session.KindOutOfRange:       {http.StatusBadRequest, CodeOutOfRange},
+	session.KindNotFound:         {http.StatusNotFound, CodeNotFound},
+	session.KindNoROM:            {http.StatusConflict, CodeNoROM},
+	session.KindAlreadyConnected: {http.StatusConflict, CodeAlreadyConnected},
+	session.KindNoBackup:         {http.StatusConflict, CodeNoBackup},
+	session.KindConnectFailed:    {http.StatusBadGateway, CodeConnectFailed},
+	session.KindDisconnected:     {http.StatusServiceUnavailable, CodeEmulatorDisconnected},
+}
 
 var emuCodes = map[emulatorv1.Error_Code]struct {
 	status int
@@ -67,6 +79,12 @@ func toAPIError(err error) *apiError {
 	var ae *apiError
 	if errors.As(err, &ae) {
 		return ae
+	}
+	var se *session.Error
+	if errors.As(err, &se) {
+		if m, ok := sessionCodes[se.Kind]; ok {
+			return &apiError{Status: m.status, Code: m.code, Msg: se.Error()}
+		}
 	}
 	var ee *emu.Error
 	if errors.As(err, &ee) {

@@ -349,8 +349,9 @@ func (u *Unit) writtenValue() []byte {
 
 // Reroll re-randomizes unlocked units like BlastUnit.Reroll: VALUE units
 // get a new value (from the vector or custom value list if they were
-// generated from one), STORE units get new domains/addresses according to
-// s.Reroll. New addresses always leave room for the unit's precision.
+// generated from one), STORE units a new source domain/address, and every
+// unit a new domain/address, according to s.Reroll. New addresses always
+// leave room for the unit's precision.
 func (l *Layer) Reroll(rng *rand.Rand, s *Settings, selected []string, mem Memory, reg *lists.Registry) error {
 	for i, u := range l.Units {
 		if u.Locked {
@@ -382,7 +383,6 @@ func (u *Unit) reroll(rng *rand.Rand, s *Settings, selected []string, mem Memory
 		default:
 			u.Value = FullRange().value(rng, p)
 		}
-		return nil
 	}
 	pick := func() (string, error) {
 		if len(selected) == 0 {
@@ -398,12 +398,12 @@ func (u *Unit) reroll(rng *rand.Rand, s *Settings, selected []string, mem Memory
 		return uint64(randomAddress(rng, int64(d.Size)-int64(p)+1)), nil
 	}
 	var err error
-	if s.Reroll.SourceDomain {
+	if u.Source == SourceStore && s.Reroll.SourceDomain {
 		if u.SourceDomain, err = pick(); err != nil {
 			return err
 		}
 	}
-	if s.Reroll.SourceAddress {
+	if u.Source == SourceStore && s.Reroll.SourceAddress {
 		if u.SourceAddress, err = addr(u.SourceDomain); err != nil {
 			return err
 		}

@@ -1,2 +1,7 @@
 /bin/
 /data/
+web/node_modules/
+internal/webui/dist/
+web/test-results/
+web/playwright-report/
+.claude/

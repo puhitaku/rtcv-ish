@@ -369,7 +369,7 @@ func DefaultSettings() *Settings {
 		},
 		Custom:         NightmareTemplate(),
 		Reroll:         RerollSettings{SourceAddress: true, SourceDomain: true},
-		GameProtection: GameProtectionSettings{IntervalSeconds: 5, Keep: 20},
+		GameProtection: GameProtectionSettings{IntervalSeconds: 5, Keep: 10},
 	}
 }
 

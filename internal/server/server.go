@@ -4,28 +4,24 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
-	"os"
+	"path"
+	"strings"
 
 	"github.com/puhitaku/rtcv-ish/internal/server/gen"
+	"github.com/puhitaku/rtcv-ish/internal/session"
 )
 
 // Version is reported in Status.version.
 var Version = "dev"
 
 // EmulatorSpec is a bundled emulator the core can launch.
-type EmulatorSpec struct {
-	Name string
-	Path string
-	// Args are passed to the executable. "{port}" in an argument is
-	// replaced with the emulator API port the core picked.
-	Args []string
-}
+type EmulatorSpec = session.EmulatorSpec
 
 type Config struct {
 	DataDir   string
@@ -45,7 +41,7 @@ func WithStatic(fsys fs.FS) Option {
 type Server struct {
 	cfg    Config
 	log    *slog.Logger
-	rng    *rand.Rand
+	sess   *session.Session
 	static fs.FS
 
 	ctx    context.Context
@@ -56,17 +52,25 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Server, error) {
 	if cfg.DataDir == "" {
 		return nil, fmt.Errorf("server: DataDir is required")
 	}
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("server: create data dir: %w", err)
-	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	sess, err := session.New(ctx, session.Config{
+		DataDir:   cfg.DataDir,
+		Seed:      cfg.Seed,
+		Logger:    cfg.Logger,
+		Emulators: cfg.Emulators,
+		Version:   Version,
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("server: %w", err)
+	}
 	s := &Server{
 		cfg:    cfg,
 		log:    cfg.Logger,
-		rng:    rand.New(rand.NewPCG(uint64(cfg.Seed), 0)),
+		sess:   sess,
 		ctx:    ctx,
 		cancel: cancel,
 	}
@@ -75,6 +79,9 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Server, error) {
 	}
 	return s, nil
 }
+
+// Session is the coordinator behind the API.
+func (s *Server) Session() *session.Session { return s.sess }
 
 // Handler returns the HTTP handler: the API under /api, the SSE stream at
 // /api/events and the web frontend at /.
@@ -107,9 +114,23 @@ func (s *Server) Handler() http.Handler {
 	return logRequests(s.log, mux)
 }
 
+// staticHandler serves the web frontend. Unknown paths get index.html so
+// that client-side routes work.
 func (s *Server) staticHandler() http.Handler {
 	if s.static != nil {
-		return http.FileServerFS(s.static)
+		fsys := s.static
+		files := http.FileServerFS(fsys)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+			if name == "" {
+				name = "."
+			}
+			if _, err := fs.Stat(fsys, name); errors.Is(err, fs.ErrNotExist) {
+				http.ServeFileFS(w, r, fsys, "index.html")
+				return
+			}
+			files.ServeHTTP(w, r)
+		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -124,5 +145,5 @@ func (s *Server) staticHandler() http.Handler {
 // Close stops background work and drops the emulator connection.
 func (s *Server) Close() error {
 	s.cancel()
-	return nil
+	return s.sess.Close()
 }

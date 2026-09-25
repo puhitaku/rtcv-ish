@@ -13,11 +13,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
-	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/logging"
+	"github.com/puhitaku/rtcv-ish/internal/server"
+	"github.com/puhitaku/rtcv-ish/internal/webui"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -84,14 +86,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	log.Info("starting", "data_dir", cfg.dataDir, "seed", cfg.seed)
 
+	core, err := server.New(ctx, server.Config{
+		DataDir:   cfg.dataDir,
+		Seed:      cfg.seed,
+		Logger:    log,
+		Emulators: bundledEmulators(log),
+	}, server.WithStatic(webui.FS()))
+	if err != nil {
+		return err
+	}
+	defer core.Close()
+
 	if cfg.emulator != "" {
-		c, err := emu.Dial(ctx, cfg.emulator, emu.WithLogger(log))
-		if err != nil {
+		if _, err := core.Session().Connect(ctx, cfg.emulator); err != nil {
 			log.Error("cannot connect to emulator", "addr", cfg.emulator, "err", err)
-		} else {
-			defer c.Close()
-			info := c.Info()
-			log.Info("connected to emulator", "addr", cfg.emulator, "emulator", info.GetEmulator(), "version", info.GetVersion(), "system", info.GetSystem())
 		}
 	}
 
@@ -99,13 +107,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "rtcv-ish\n")
-	})
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           core.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
@@ -126,7 +129,47 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := srv.Shutdown(sctx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	return nil
+	return core.Close()
+}
+
+// melonDSArgs makes a bundled melonDS listen on the port the core picks.
+var melonDSArgs = []string{"--rtcvish-listen", "127.0.0.1:{port}"}
+
+// bundledEmulators lists the emulators shipped next to the executable in
+// emulators/<name>.
+func bundledEmulators(log *slog.Logger) []server.EmulatorSpec {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Warn("cannot locate executable; no bundled emulators", "err", err)
+		return nil
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	dir := filepath.Join(filepath.Dir(exe), "emulators", "melonds")
+	return []server.EmulatorSpec{{Name: "melonDS", Path: melonDSPath(dir), Args: melonDSArgs}}
+}
+
+// melonDSPath returns the melonDS executable in dir for this OS. When
+// none exists it returns the preferred path, reported as not present.
+func melonDSPath(dir string) string {
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []string{filepath.Join(dir, "melonDS.app", "Contents", "MacOS", "melonDS")}
+	case "windows":
+		candidates = []string{filepath.Join(dir, "melonDS.exe")}
+	case "linux":
+		images, _ := filepath.Glob(filepath.Join(dir, "melonDS*.AppImage"))
+		candidates = images
+	}
+	candidates = append(candidates, filepath.Join(dir, "melonDS"))
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return candidates[0]
 }
 
 func browserURL(addr net.Addr) string {
