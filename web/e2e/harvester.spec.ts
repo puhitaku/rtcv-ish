@@ -45,6 +45,22 @@ test('connect, blast, harvest, edit and export', async ({ page }) => {
     .poll(async () => Number(await tid(page, 'frame-counter').textContent()))
     .toBeGreaterThan(f0)
 
+  // Quick actions next to the emulator chip.
+  await expect(tid(page, 'qa-launch')).toBeDisabled()
+  await expect(tid(page, 'qa-pause')).toHaveText('Pause')
+  await tid(page, 'qa-pause').click()
+  await expect(tid(page, 'qa-pause')).toHaveText('Resume')
+  await expect(tid(page, 'log-strip')).toContainText('paused')
+  await tid(page, 'qa-pause').click()
+  await expect(tid(page, 'qa-pause')).toHaveText('Pause')
+  await tid(page, 'qa-reset').click()
+  await expect(tid(page, 'log-strip')).toContainText('reset')
+
+  // The Engine section is shown above every tab; Harvester is the default tab.
+  await expect(tid(page, 'nav-engine')).toHaveCount(0)
+  await expect(tid(page, 'nav-harvester')).toHaveAttribute('aria-current', 'page')
+  await expect(tid(page, 'engine-config')).toBeVisible()
+
   // Domains were auto-selected by the ROM load.
   await expect(page.locator('[data-testid^="domain-"][aria-selected="true"]').first()).toBeVisible()
 
@@ -122,7 +138,6 @@ test('real emulator: scheduled units and screenshot', async ({ page, request }) 
   })
   expect(patched.ok()).toBe(true)
   await page.reload()
-  await tid(page, 'nav-engine').click()
   await tid(page, 'manual-blast').click()
   await expect(tid(page, 'log-strip')).toContainText('blast: 4 units')
   await expect
@@ -146,18 +161,45 @@ test('real emulator: scheduled units and screenshot', async ({ page, request }) 
   await expect(tid(page, 'toast')).toHaveCount(0)
 })
 
-test('theme toggle persists', async ({ page }) => {
+test('theme setting persists', async ({ page }) => {
   await page.goto(base())
   const html = page.locator('html')
   await expect(html).not.toHaveAttribute('data-theme', /.+/)
-  await tid(page, 'theme-toggle').click()
+  await expect(tid(page, 'theme-toggle')).toHaveCount(0)
+  await tid(page, 'nav-settings').click()
+  await expect(tid(page, 'theme-system')).toHaveAttribute('aria-pressed', 'true')
+  await tid(page, 'theme-light').click()
   await expect(html).toHaveAttribute('data-theme', 'light')
-  await tid(page, 'theme-toggle').click()
+  await tid(page, 'theme-dark').click()
   await expect(html).toHaveAttribute('data-theme', 'dark')
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
   expect(bg).toBe('rgb(17, 20, 24)')
   await page.reload()
   await expect(html).toHaveAttribute('data-theme', 'dark')
-  await tid(page, 'theme-toggle').click()
+  await tid(page, 'nav-settings').click()
+  await expect(tid(page, 'theme-dark')).toHaveAttribute('aria-pressed', 'true')
+  await tid(page, 'theme-system').click()
   await expect(html).not.toHaveAttribute('data-theme', /.+/)
+})
+
+test('engine section collapses and stays collapsed', async ({ page }) => {
+  await page.goto(base())
+  const toggle = tid(page, 'engine-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(tid(page, 'intensity-number')).toBeVisible()
+  // Visible on every tab.
+  await tid(page, 'nav-memory').click()
+  await expect(tid(page, 'intensity-number')).toBeVisible()
+  const before = (await tid(page, 'panel').boundingBox())!.height
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(tid(page, 'intensity-number')).toBeHidden()
+  await expect(tid(page, 'engine-summary')).toBeVisible()
+  expect((await tid(page, 'panel').boundingBox())!.height).toBeGreaterThan(before)
+
+  await page.reload()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect(tid(page, 'intensity-number')).toBeVisible()
 })

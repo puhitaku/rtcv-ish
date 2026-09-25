@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import EnginePanel from './panels/EnginePanel.vue'
+import EngineConfig from './engine/EngineConfig.vue'
 import SavestateManager from './harvester/SavestateManager.vue'
 import SettingsPanel from './panels/SettingsPanel.vue'
+import EngineSection from './EngineSection.vue'
+import SideBar from './SideBar.vue'
 import TopBar from './TopBar.vue'
 import { mockFetch } from '@/test/fetch'
 import { settingsFixture, statusFixture } from '@/test/fixtures'
@@ -21,14 +23,14 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-describe('EnginePanel', () => {
+describe('EngineConfig', () => {
   it('switches engine parameter blocks via PATCH settings', async () => {
     let server: Settings = settingsFixture()
     const { calls } = mockFetch({
       'PATCH /api/settings': (c) => (server = deepMerge(server, c.body)),
     })
     useSettingsStore().settings = settingsFixture()
-    const w = mount(EnginePanel)
+    const w = mount(EngineConfig)
 
     expect(w.find(tid('engine-params-nightmare')).exists()).toBe(true)
     expect(w.find(tid('nightmare-algo')).exists()).toBe(true)
@@ -62,7 +64,7 @@ describe('EnginePanel', () => {
       'PATCH /api/settings': (c) => (server = deepMerge(server, c.body)),
     })
     useSettingsStore().settings = { ...settingsFixture(), precision: 8 }
-    const w = mount(EnginePanel)
+    const w = mount(EngineConfig)
     const max = w.find(tid('nightmare-range-max'))
     expect((max.element as HTMLInputElement).value).toBe('18446744073709551615')
     await max.setValue('18446744073709551616')
@@ -82,7 +84,7 @@ describe('EnginePanel', () => {
       'PATCH /api/settings': (c) => deepMerge(settingsFixture(), c.body),
     })
     useSettingsStore().settings = settingsFixture()
-    const w = mount(EnginePanel)
+    const w = mount(EngineConfig)
     const n = w.find(tid('intensity-number'))
     await n.setValue('1000000')
     await n.trigger('change')
@@ -158,7 +160,8 @@ describe('TopBar', () => {
     expect(last.attributes('disabled')).toBeUndefined()
     await last.trigger('click')
     await flushPromises()
-    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/protection/last'])
+    const posts = calls.filter((c) => c.method === 'POST')
+    expect(posts.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/protection/last'])
     expect(useLogStore().entries.at(-1)?.msg).toBe('game protection: loaded last backup')
   })
 })
@@ -319,11 +322,192 @@ describe('freeze mode setting', () => {
     for (const engine of ['freeze', 'hellgenie', 'pipe', 'custom'] as const) {
       setActivePinia(createPinia())
       useSettingsStore().settings = { ...settingsFixture(), engine }
-      const w = mount(EnginePanel)
+      const w = mount(EngineConfig)
       expect(w.find(tid('freeze-mode')).exists(), engine).toBe(true)
       w.unmount()
     }
     useSettingsStore().settings = settingsFixture()
-    expect(mount(EnginePanel).find(tid('freeze-mode')).exists()).toBe(false)
+    expect(mount(EngineConfig).find(tid('freeze-mode')).exists()).toBe(false)
+  })
+})
+
+describe('TopBar quick actions', () => {
+  const emus = [
+    { name: 'missing', path: '/nope', present: false },
+    { name: 'melonDS', path: '/bin/melonDS', present: true },
+  ]
+  const posts = (calls: { method: string; path: string }[]) =>
+    calls.filter((c) => c.method === 'POST').map((c) => c.path)
+
+  it('launches the first available emulator without a ROM', async () => {
+    const { calls } = mockFetch({
+      'GET /api/emulators': emus,
+      'POST /api/emulator/launch': () => statusFixture(),
+    })
+    const st = useStatusStore()
+    st.set(statusFixture({ connected: false }))
+    const w = mount(TopBar)
+    await flushPromises()
+
+    const launch = w.find(tid('qa-launch'))
+    expect(launch.attributes('disabled')).toBeUndefined()
+    await launch.trigger('click')
+    await flushPromises()
+    expect(calls.find((c) => c.path === '/api/emulator/launch')!.body).toEqual({
+      name: 'melonDS',
+    })
+    expect(useLogStore().entries.at(-1)?.msg).toBe('launched melonDS')
+    expect(launch.attributes('disabled')).toBeDefined()
+    expect(launch.attributes('title')).toBe('Already connected')
+  })
+
+  it('disables Launch and Load ROM without an emulator to launch', async () => {
+    mockFetch({ 'GET /api/emulators': [emus[0]] })
+    useStatusStore().set(statusFixture({ connected: false }))
+    const w = mount(TopBar)
+    await flushPromises()
+    for (const id of ['qa-launch', 'qa-load-rom', 'qa-pause', 'qa-reset']) {
+      expect(w.find(tid(id)).attributes('disabled'), id).toBeDefined()
+    }
+    expect(w.find(tid('qa-launch')).attributes('title')).toContain('No bundled')
+    expect(w.find(tid('qa-load-rom')).attributes('title')).toContain('not connected')
+    expect(w.find(tid('qa-pause')).attributes('title')).toBe('Emulator not connected')
+  })
+
+  it('Load ROM launches with the picked ROM when disconnected', async () => {
+    const { calls } = mockFetch({
+      'GET /api/emulators': emus,
+      'GET /api/browse': {
+        path: '/r',
+        parent: '/',
+        entries: [{ name: 'a.nds', path: '/r/a.nds', dir: false, size: 1 }],
+      },
+      'POST /api/emulator/launch': () => statusFixture(),
+    })
+    useStatusStore().set(statusFixture({ connected: false }))
+    const w = mount(TopBar, { attachTo: document.body })
+    await flushPromises()
+
+    await w.find(tid('qa-load-rom')).trigger('click')
+    await flushPromises()
+    expect(w.find(tid('file-picker')).exists()).toBe(true)
+    await w.find('[data-name="a.nds"]').trigger('click')
+    await flushPromises()
+    expect(w.find(tid('file-picker')).exists()).toBe(false)
+    expect(posts(calls)).toEqual(['/api/emulator/launch'])
+    expect(calls.at(-1)!.body).toEqual({ name: 'melonDS', rom: '/r/a.nds' })
+    expect(JSON.parse(localStorage.getItem('rtcvish.connect')!).rom).toBe('/r/a.nds')
+    w.unmount()
+  })
+
+  it('Load ROM loads into the connected emulator; Pause/Resume and Reset follow the game', async () => {
+    const game = statusFixture().game!
+    const { calls } = mockFetch({
+      'GET /api/emulators': emus,
+      'GET /api/browse': {
+        path: '/r',
+        parent: '/',
+        entries: [{ name: 'b.nds', path: '/r/b.nds', dir: false, size: 1 }],
+      },
+      'POST /api/emulator/rom': () => ({ ...game, romPath: '/r/b.nds' }),
+      'POST /api/emulator/pause': () => ({ ...game, state: 'paused' }),
+      'POST /api/emulator/resume': () => game,
+      'POST /api/emulator/reset': () => game,
+    })
+    useStatusStore().set(statusFixture())
+    const w = mount(TopBar)
+    await flushPromises()
+
+    await w.find(tid('qa-load-rom')).trigger('click')
+    await flushPromises()
+    await w.find('[data-name="b.nds"]').trigger('click')
+    await flushPromises()
+    expect(calls.find((c) => c.path === '/api/emulator/rom')!.body).toEqual({ path: '/r/b.nds' })
+
+    const pause = w.find(tid('qa-pause'))
+    expect(pause.text()).toBe('Pause')
+    await pause.trigger('click')
+    await flushPromises()
+    expect(pause.text()).toBe('Resume')
+    await pause.trigger('click')
+    await flushPromises()
+    expect(pause.text()).toBe('Pause')
+    await w.find(tid('qa-reset')).trigger('click')
+    await flushPromises()
+    expect(posts(calls)).toEqual([
+      '/api/emulator/rom',
+      '/api/emulator/pause',
+      '/api/emulator/resume',
+      '/api/emulator/reset',
+    ])
+    expect(w.find(tid('qa-launch')).attributes('disabled')).toBeDefined()
+
+    useStatusStore().set(statusFixture({ game: { ...game, state: 'noRom' } }))
+    await flushPromises()
+    expect(pause.attributes('disabled')).toBeDefined()
+    expect(pause.attributes('title')).toBe('No ROM loaded')
+    expect(w.find(tid('qa-reset')).attributes('disabled')).toBeDefined()
+  })
+
+  it('has no theme toggle', () => {
+    mockFetch({})
+    useStatusStore().set(statusFixture())
+    expect(mount(TopBar).find(tid('theme-toggle')).exists()).toBe(false)
+  })
+})
+
+describe('theme setting', () => {
+  it('is in the Settings panel and persists', async () => {
+    mockFetch({})
+    const w = mount(SettingsPanel)
+    const ui = useUiStore()
+    expect(ui.theme).toBe('system')
+    expect(w.find(tid('theme-system')).attributes('aria-pressed')).toBe('true')
+    await w.find(tid('theme-dark')).trigger('click')
+    await flushPromises()
+    expect(ui.theme).toBe('dark')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+    expect(localStorage.getItem('rtcvish.theme')).toBe('dark')
+    expect(w.find(tid('theme-dark')).attributes('aria-pressed')).toBe('true')
+    await w.find(tid('theme-system')).trigger('click')
+    await flushPromises()
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+  })
+})
+
+describe('layout', () => {
+  it('starts on Harvester without an Engine tab', () => {
+    expect(useUiStore().panel).toBe('harvester')
+    const w = mount(SideBar)
+    expect(w.findAll('nav button').map((b) => b.text())).toEqual([
+      'Harvester',
+      'Blast Editor',
+      'Memory',
+      'Settings',
+    ])
+    expect(w.find(tid('nav-engine')).exists()).toBe(false)
+  })
+
+  it('collapses the Engine section and remembers it', async () => {
+    mockFetch({})
+    useSettingsStore().settings = settingsFixture()
+    const w = mount(EngineSection)
+    const toggle = w.find(tid('engine-toggle'))
+    const body = () => w.find(tid('engine-section-body'))
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(body().attributes('style') ?? '').not.toContain('display: none')
+    expect(w.find(tid('engine-config')).exists()).toBe(true)
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(body().attributes('style')).toContain('display: none')
+    expect(w.find(tid('engine-summary')).text()).toContain('intensity')
+    await flushPromises()
+    expect(localStorage.getItem('rtcvish.engineOpen')).toBe('false')
+
+    setActivePinia(createPinia())
+    useSettingsStore().settings = settingsFixture()
+    const w2 = mount(EngineSection)
+    expect(w2.find(tid('engine-toggle')).attributes('aria-expanded')).toBe('false')
   })
 })

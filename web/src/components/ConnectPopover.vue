@@ -4,12 +4,13 @@ import FilePicker from './ui/FilePicker.vue'
 import { act } from '@/stores/log'
 import { useStatusStore } from '@/stores/status'
 import { loadJSON, save } from '@/lib/storage'
+import { CONNECT_DEFAULTS, CONNECT_KEY as KEY, useGlobalActions } from '@/lib/shortcuts'
 
 const emit = defineEmits<{ close: [] }>()
 const st = useStatusStore()
+const actions = useGlobalActions()
 
-const KEY = 'rtcvish.connect'
-const saved = loadJSON(KEY, { address: '127.0.0.1:42069', rom: '' })
+const saved = loadJSON(KEY, CONNECT_DEFAULTS)
 const address = ref(saved.address)
 const rom = ref(saved.rom)
 const busy = ref(false)
@@ -142,24 +143,13 @@ onMounted(() => void act(() => st.fetchEmulators()))
 
     <section class="flex flex-wrap gap-1">
       <button
-        v-if="st.game?.state === 'paused'"
         class="btn"
-        :disabled="!!st.needRom"
-        :title="st.needRom"
-        data-testid="emu-resume"
-        @click="run(() => st.control('resume'), 'resumed')"
+        :disabled="!!actions.pause.disabled.value"
+        :title="actions.pause.disabled.value"
+        :data-testid="st.game?.state === 'paused' ? 'emu-resume' : 'emu-pause'"
+        @click="actions.pause.run()"
       >
-        Resume
-      </button>
-      <button
-        v-else
-        class="btn"
-        :disabled="!!st.needRom"
-        :title="st.needRom"
-        data-testid="emu-pause"
-        @click="run(() => st.control('pause'), 'paused')"
-      >
-        Pause
+        {{ st.game?.state === 'paused' ? 'Resume' : 'Pause' }}
       </button>
       <button
         class="btn"
@@ -172,10 +162,10 @@ onMounted(() => void act(() => st.fetchEmulators()))
       </button>
       <button
         class="btn"
-        :disabled="!!st.needRom"
-        :title="st.needRom"
+        :disabled="!!actions.reset.disabled.value"
+        :title="actions.reset.disabled.value"
         data-testid="emu-reset"
-        @click="run(() => st.control('reset'), 'reset')"
+        @click="actions.reset.run()"
       >
         Reset
       </button>

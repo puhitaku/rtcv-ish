@@ -46,7 +46,7 @@ function setPrecision(p: Precision) {
   <div
     v-if="store.settings"
     class="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(18rem,1.3fr)_minmax(16rem,1fr)]"
-    data-testid="engine-panel"
+    data-testid="engine-config"
   >
     <BoxPanel title="General Parameters">
       <MultiTrackBar
@@ -117,5 +117,5 @@ function setPrecision(p: Precision) {
 
     <DomainsBox />
   </div>
-  <div v-else class="text-dim" data-testid="engine-panel-loading">Loading settings…</div>
+  <div v-else class="text-dim" data-testid="engine-config-loading">Loading settings…</div>
 </template>

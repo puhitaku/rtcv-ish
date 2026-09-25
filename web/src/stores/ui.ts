@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { loadJSON, loadString, save } from '@/lib/storage'
 
-export type Panel = 'engine' | 'harvester' | 'editor' | 'memory' | 'settings'
+export type Panel = 'harvester' | 'editor' | 'memory' | 'settings'
 export type Theme = 'system' | 'light' | 'dark'
 export type GhMode = 'corrupt' | 'inject' | 'original'
 
@@ -17,6 +17,7 @@ export type EditorTarget =
 
 const THEME_KEY = 'rtcvish.theme'
 const GH_KEY = 'rtcvish.gh'
+const ENGINE_OPEN_KEY = 'rtcvish.engineOpen'
 
 export function applyTheme(t: Theme) {
   if (typeof document === 'undefined') return
@@ -26,7 +27,14 @@ export function applyTheme(t: Theme) {
 }
 
 export const useUiStore = defineStore('ui', () => {
-  const panel = ref<Panel>('engine')
+  const panel = ref<Panel>('harvester')
+
+  /** The persistent Engine section is expanded. */
+  const engineOpen = ref(loadString(ENGINE_OPEN_KEY, 'true') !== 'false')
+  watch(engineOpen, (v) => save(ENGINE_OPEN_KEY, String(v)))
+
+  /** The top bar's ROM picker dialog is open. */
+  const romPicker = ref(false)
 
   const theme = ref<Theme>(loadString(THEME_KEY, 'system') as Theme)
   watch(
@@ -37,11 +45,6 @@ export const useUiStore = defineStore('ui', () => {
     },
     { immediate: true },
   )
-
-  function cycleTheme() {
-    const order: Theme[] = ['system', 'light', 'dark']
-    theme.value = order[(order.indexOf(theme.value) + 1) % order.length]!
-  }
 
   const gh = ref(
     loadJSON<{ mode: GhMode } & Behaviours>(GH_KEY, {
@@ -77,8 +80,9 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     panel,
+    engineOpen,
+    romPicker,
     theme,
-    cycleTheme,
     gh,
     selectedSlot,
     stashSelection,

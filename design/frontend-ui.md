@@ -4,7 +4,7 @@ An RTCV-equivalent GUI in the browser. Equivalent means the same tools,
 controls and workflow, not the same pixels. Hacker-tool aesthetic: flat
 panels, one accent color, monospace for addresses and values, no
 gradients, no decoration. Light and dark follow the OS
-(`prefers-color-scheme`), with a manual override in the top bar.
+(`prefers-color-scheme`), with a manual override in Settings.
 
 ## Stack
 
@@ -17,14 +17,16 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 
 ```
 +------------------------------------------------------------------+
-| rtcv-ish   [emulator: melonDS  connected]  [game: hello_world]    |
-|            [frame 12345]  [Manual Blast] [Auto-Corrupt: OFF]      |
+| rtcv-ish [● melonDS 1.1] [Launch][Load ROM][Pause][Reset]         |
+|   [busy]  game hello_world  frame 12345   [Manual Blast] [Auto..] |
+|   [Game Protection: OFF] [Back] [Last] [Now]                      |
++------------------------------------------------------------------+
+| ▾ Engine                                                          |
+| [General Parameters] [Corruption Engine] [Memory Domains]         |
 +-----------+------------------------------------------------------+
-| Engine    |                                                      |
-| Harvester |          active panel                                |
-| Blast Ed. |                                                      |
+| Harvester |                                                      |
+| Blast Ed. |          active tab (scrolls)                        |
 | Memory    |                                                      |
-| Hex       |                                                      |
 | Settings  |                                                      |
 +-----------+------------------------------------------------------+
 | log line ... (last few user-facing messages)                      |
@@ -33,9 +35,21 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 
 - Top bar: connection status (with a Connect/Launch popover: address
   field, bundled emulator list, ROM path with a Browse… picker that lists
-  core-host directories via `/api/browse`), game name and frame counter,
-  the two global actions Manual Blast and Auto-Corrupt toggle, theme
-  toggle. Game Protection: toggle + Back + Last + Now.
+  core-host directories via `/api/browse`, Pause/Resume, Step, Reset,
+  Close ROM, Quit), game name and frame counter, the two global actions
+  Manual Blast and Auto-Corrupt toggle. Game Protection: toggle + Back +
+  Last + Now.
+- Quick actions, right of the connection chip: Launch (the first bundled
+  or development emulator whose executable exists, no ROM; disabled with
+  a reason when none is present or already connected), Load ROM (opens
+  the file picker; the chosen ROM is loaded into the connected emulator,
+  or the first available emulator is launched with it, and it becomes the
+  popover's ROM path), Pause/Resume (label follows the game state) and
+  Reset (both disabled without a ROM). They are entries of
+  `useGlobalActions` (`launch`, `loadRom`, `pause`, `reset`), shared with
+  the popover's Pause/Resume and Reset, so shortcuts can bind them. They
+  are always rendered and Pause/Resume has a fixed width, so they never
+  shift the title or frame counter.
 - Stuck emulator: once `Status.busy` has been set for at least 1 s
   (elapsed time ticks locally from `sinceMs`), a small monospace
   `<operation> <seconds>s` appears next to the connection status, so fast
@@ -50,14 +64,23 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
   unresponsive (the core never gates them); Quit reads "Quit / kill"
   when unresponsive or busy for more than 5 s, and its tooltip says the
   core force-kills a launched emulator that has not exited after 3 s.
-- Left sidebar switches panels. Panels mirror RTCV grids.
+- Engine section: the Engine configuration (below) sits between the top
+  bar and the tab area on every tab, at its natural height (capped at
+  60% of the viewport, scrolling inside beyond that). Its header row has
+  a collapse/expand handle (default expanded, persisted in localStorage
+  under `rtcvish.engineOpen`); collapsed, the header shows a one-line
+  summary (engine, intensity, precision, selected domains).
+- Left sidebar switches the tabs below the Engine section: Harvester
+  (default), Blast Editor, Memory, Settings. The tab area takes the
+  remaining height and scrolls. Panels mirror RTCV grids.
 - Bottom: a short log strip fed by `log` events.
 
 ## Panels
 
-### Engine
+### Engine (persistent section)
 
-Three columns like RTCV's Engine Config grid:
+Always visible above the tabs (see Layout). Three columns like RTCV's
+Engine Config grid:
 
 1. General parameters: Intensity (slider + number, non-linear slider
    scale, uncapped number), Error Delay (same), Blast Radius select,
@@ -183,8 +206,9 @@ hidden or no ROM is loaded, and the timer stops when the panel is left.
 
 Reroll settings, StepActions settings (max infinite units, lock units,
 infinite units: per frame / per scanline / hard),
-game protection interval, lists manager (upload/delete `.txt`), data
-directory, log level, About.
+game protection interval, lists manager (upload/delete `.txt`), theme
+(Auto / Light / Dark, persisted in localStorage under `rtcvish.theme`),
+shortcut list, data directory, log level, About.
 
 ## Behaviour
 
@@ -207,7 +231,8 @@ directory, log level, About.
 - Everything is keyboard-usable. Global shortcuts (plain single keys, no
   modifiers): `m` Manual Blast, `a` toggle Auto-Corrupt, `p` toggle Game
   Protection, `b` / `l` / `n` Game Protection Back / Last / Now. They run
-  the same actions as the top bar buttons (same enabled conditions, same
+  the same actions as the top bar buttons (the quick actions have no key
+  yet) (same enabled conditions, same
   log lines), and are ignored while focus is in an input, textarea,
   select or contenteditable, or while a dialog, prompt or context menu is
   open. The key map is one table in `web/src/lib/shortcuts.ts`; button
@@ -220,4 +245,5 @@ directory, log level, About.
 - Playwright: against `rtcv-ish` with the fake emulator: connect, load a
   ROM, manual blast, create a savestate slot, corrupt, stash appears,
   send to stockpile, open in Blast Editor, disable 50%, apply, export
-  stockpile, theme toggle.
+  stockpile, quick actions (Pause/Resume, Reset), theme setting, Engine
+  section collapse.

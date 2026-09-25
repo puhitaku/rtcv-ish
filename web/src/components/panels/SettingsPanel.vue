@@ -9,12 +9,20 @@ import { useListsStore } from '@/stores/lists'
 import { act } from '@/stores/log'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
+import { useUiStore, type Theme } from '@/stores/ui'
 import type { Settings } from '@/api/types'
 
 const store = useSettingsStore()
 const lists = useListsStore()
 const st = useStatusStore()
 const patch = useSettingsPatch()
+const ui = useUiStore()
+
+const themes: { id: Theme; label: string }[] = [
+  { id: 'system', label: 'Auto' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+]
 
 const rerollFlags: { k: keyof Settings['reroll']; label: string }[] = [
   { k: 'address', label: 'Reroll address' },
@@ -166,6 +174,26 @@ function chk(e: Event) {
           </tr>
         </tbody>
       </table>
+    </BoxPanel>
+
+    <BoxPanel title="Appearance">
+      <div class="flex items-center gap-2" role="group" aria-label="Theme">
+        <span>Theme:</span>
+        <span class="flex gap-1">
+          <button
+            v-for="t in themes"
+            :key="t.id"
+            class="btn"
+            :class="{ 'btn-on': ui.theme === t.id }"
+            :aria-pressed="ui.theme === t.id"
+            :title="t.id === 'system' ? 'Follow the OS light/dark setting' : `Always ${t.id}`"
+            :data-testid="`theme-${t.id}`"
+            @click="ui.theme = t.id"
+          >
+            {{ t.label }}
+          </button>
+        </span>
+      </div>
     </BoxPanel>
 
     <BoxPanel title="Shortcuts">

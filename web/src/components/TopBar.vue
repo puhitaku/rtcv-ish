@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ConnectPopover from './ConnectPopover.vue'
-import { useGlobalActions, withKeyHint as hint } from '@/lib/shortcuts'
+import FilePicker from './ui/FilePicker.vue'
+import { loadOrLaunch, useGlobalActions, withKeyHint as hint } from '@/lib/shortcuts'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
 import { useUiStore } from '@/stores/ui'
@@ -17,7 +18,11 @@ const root = ref<HTMLElement | null>(null)
 function onDown(e: MouseEvent) {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
 }
-onMounted(() => window.addEventListener('mousedown', onDown))
+onMounted(() => {
+  window.addEventListener('mousedown', onDown)
+  // The Launch quick action needs the emulator list; failures only disable it.
+  st.fetchEmulators().catch(() => undefined)
+})
 onBeforeUnmount(() => window.removeEventListener('mousedown', onDown))
 
 const emuLabel = computed(() => {
@@ -58,7 +63,12 @@ const gameLabel = computed(() => {
 const autoCorrupt = computed(() => settings.settings?.autoCorrupt ?? false)
 const protection = computed(() => settings.settings?.gameProtection.enabled ?? false)
 
-const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark' })[ui.theme])
+const paused = computed(() => st.game?.state === 'paused')
+
+function pickedRom(path: string) {
+  ui.romPicker = false
+  void loadOrLaunch(path)
+}
 </script>
 
 <template>
@@ -83,6 +93,62 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
       </button>
       <ConnectPopover v-if="open" @close="open = false" />
     </div>
+
+    <!-- Always rendered with fixed widths so state changes never shift the title. -->
+    <span class="flex shrink-0 items-center gap-1" data-testid="quick-actions">
+      <button
+        class="btn"
+        :disabled="!!actions.launch.disabled.value"
+        :title="
+          actions.launch.disabled.value ||
+          hint('launch', `Launch ${st.emulators.find((e) => e.present)?.name ?? ''} without a ROM`)
+        "
+        data-testid="qa-launch"
+        @click="actions.launch.run()"
+      >
+        Launch
+      </button>
+      <button
+        class="btn"
+        :disabled="!!actions.loadRom.disabled.value"
+        :title="
+          actions.loadRom.disabled.value ||
+          hint(
+            'loadRom',
+            st.connected
+              ? 'Choose a ROM and load it'
+              : 'Choose a ROM and launch the emulator with it',
+          )
+        "
+        data-testid="qa-load-rom"
+        @click="actions.loadRom.run()"
+      >
+        Load ROM
+      </button>
+      <button
+        class="btn w-[8ch]"
+        :disabled="!!actions.pause.disabled.value"
+        :title="
+          actions.pause.disabled.value ||
+          hint('pause', paused ? 'Resume the game' : 'Pause the game')
+        "
+        :aria-pressed="paused"
+        data-testid="qa-pause"
+        @click="actions.pause.run()"
+      >
+        {{ paused ? 'Resume' : 'Pause' }}
+      </button>
+      <button
+        class="btn"
+        :disabled="!!actions.reset.disabled.value"
+        :title="actions.reset.disabled.value || hint('reset', 'Reset the game')"
+        data-testid="qa-reset"
+        @click="actions.reset.run()"
+      >
+        Reset
+      </button>
+    </span>
+    <FilePicker v-if="ui.romPicker" @select="pickedRom" @close="ui.romPicker = false" />
 
     <!-- Fixed-width slot so the indicator never shifts the title or frame counter. -->
     <span class="w-[18ch] shrink-0 truncate font-mono text-xs text-dim" data-testid="busy-slot">
@@ -190,14 +256,5 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
         Now
       </button>
     </span>
-
-    <button
-      class="btn"
-      :title="`Theme: ${themeLabel} (click to change)`"
-      data-testid="theme-toggle"
-      @click="ui.cycleTheme()"
-    >
-      Theme: {{ themeLabel }}
-    </button>
   </header>
 </template>

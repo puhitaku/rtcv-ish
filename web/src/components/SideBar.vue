@@ -3,7 +3,6 @@ import { useUiStore, type Panel } from '@/stores/ui'
 
 const ui = useUiStore()
 const items: { id: Panel; label: string }[] = [
-  { id: 'engine', label: 'Engine' },
   { id: 'harvester', label: 'Harvester' },
   { id: 'editor', label: 'Blast Editor' },
   { id: 'memory', label: 'Memory' },

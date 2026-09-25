@@ -41,7 +41,7 @@ const st = useStatusStore()
       </button>
     </div>
     <ul
-      class="min-h-24 flex-1 overflow-auto border border-line bg-inset"
+      class="max-h-64 min-h-24 flex-1 overflow-auto border border-line bg-inset"
       role="listbox"
       aria-multiselectable="true"
       data-testid="domain-list"

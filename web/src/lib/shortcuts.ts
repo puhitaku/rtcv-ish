@@ -3,10 +3,21 @@ import { act } from '@/stores/log'
 import { useDialogStore } from '@/stores/dialog'
 import { useSettingsStore } from '@/stores/settings'
 import { useStatusStore } from '@/stores/status'
+import { useUiStore } from '@/stores/ui'
 import { useUnitsStore } from '@/stores/units'
+import { loadJSON, save } from '@/lib/storage'
 
 export type GlobalActionId =
-  'blast' | 'autoCorrupt' | 'protection' | 'protectionBack' | 'protectionLast' | 'protectionNow'
+  | 'blast'
+  | 'autoCorrupt'
+  | 'protection'
+  | 'protectionBack'
+  | 'protectionLast'
+  | 'protectionNow'
+  | 'launch'
+  | 'loadRom'
+  | 'pause'
+  | 'reset'
 
 /** Global keyboard shortcuts: plain single keys, no modifiers. */
 export const SHORTCUTS: readonly { key: string; action: GlobalActionId; label: string }[] = [
@@ -35,17 +46,50 @@ export interface GlobalAction {
   run: () => Promise<unknown>
 }
 
+/** Saved Connect popover fields; the quick actions share the ROM path. */
+export const CONNECT_KEY = 'rtcvish.connect'
+export const CONNECT_DEFAULTS = { address: '127.0.0.1:42069', rom: '' }
+
+/** The first bundled or development emulator whose executable exists. */
+function firstEmulator() {
+  return useStatusStore().emulators.find((e) => e.present)
+}
+
+const NO_EMULATOR = 'No bundled or development emulator found'
+
+/**
+ * Loads a ROM picked from the top bar: into the connected emulator, or by
+ * launching the first available emulator with it.
+ */
+export async function loadOrLaunch(path: string): Promise<unknown> {
+  const st = useStatusStore()
+  save(CONNECT_KEY, { ...loadJSON(CONNECT_KEY, CONNECT_DEFAULTS), rom: path })
+  if (st.connected) return act(() => st.loadRom(path), `loaded ${path}`)
+  const e = firstEmulator()
+  if (!e) return act(() => Promise.reject(new Error(NO_EMULATOR)))
+  return act(() => st.launch(e.name, path), `launched ${e.name}`)
+}
+
 /** The top bar's global actions, shared by its buttons and the shortcuts. */
 export function useGlobalActions(): Record<GlobalActionId, GlobalAction> {
   const st = useStatusStore()
   const settings = useSettingsStore()
   const units = useUnitsStore()
+  const ui = useUiStore()
 
   const noSettings = computed(() => (settings.settings ? '' : 'Settings not loaded'))
   const needBackup = computed(
     () => st.needRom || (st.status?.protectionBackups ? '' : 'No backups yet'),
   )
   const needRom = computed(() => st.needRom)
+  const launchReason = computed(() => {
+    if (st.connected) return 'Already connected'
+    return firstEmulator() ? '' : NO_EMULATOR
+  })
+  const loadRomReason = computed(() => {
+    if (st.connected) return st.needEmu
+    return firstEmulator() ? '' : `Emulator not connected and ${NO_EMULATOR.toLowerCase()}`
+  })
 
   return {
     blast: { disabled: needRom, run: () => act(() => units.blast()) },
@@ -74,6 +118,27 @@ export function useGlobalActions(): Record<GlobalActionId, GlobalAction> {
       disabled: needRom,
       run: () => act(() => st.protectionNow(), 'game protection: backup taken'),
     },
+    launch: {
+      disabled: launchReason,
+      run: async () => {
+        const e = firstEmulator()
+        if (e) await act(() => st.launch(e.name), `launched ${e.name}`)
+      },
+    },
+    loadRom: {
+      disabled: loadRomReason,
+      run: async () => {
+        ui.romPicker = true
+      },
+    },
+    pause: {
+      disabled: needRom,
+      run: () =>
+        st.game?.state === 'paused'
+          ? act(() => st.control('resume'), 'resumed')
+          : act(() => st.control('pause'), 'paused'),
+    },
+    reset: { disabled: needRom, run: () => act(() => st.control('reset'), 'reset') },
   }
 }
 

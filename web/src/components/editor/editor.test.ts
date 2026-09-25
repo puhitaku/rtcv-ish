@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import BlastEditorPanel from '@/components/panels/BlastEditorPanel.vue'
-import EnginePanel from '@/components/panels/EnginePanel.vue'
+import EngineConfig from '@/components/engine/EngineConfig.vue'
 import { COLUMNS } from './columns'
 import { mockFetch } from '@/test/fetch'
 import { settingsFixture } from '@/test/fixtures'
@@ -142,7 +142,7 @@ describe('address range', () => {
     })
     const store = useSettingsStore()
     store.settings = settingsFixture()
-    const w = mount(EnginePanel)
+    const w = mount(EngineConfig)
     const start = w.find(tid('address-range-start'))
     expect((start.element as HTMLInputElement).disabled).toBe(true)
     expect(w.find(tid('address-range-hint')).text()).toContain('off')
