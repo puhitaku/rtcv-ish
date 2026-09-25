@@ -4,6 +4,7 @@ type S = components['schemas']
 
 export type ApiErrorBody = S['Error']
 export type Status = S['Status']
+export type BusyStatus = S['BusyStatus']
 export type GameStatus = S['GameStatus']
 export type BundledEmulator = S['BundledEmulator']
 export type Domain = S['Domain']

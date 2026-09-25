@@ -13,10 +13,12 @@ import MemoryPanel from './components/panels/MemoryPanel.vue'
 import SettingsPanel from './components/panels/SettingsPanel.vue'
 import { useShortcuts } from './lib/shortcuts'
 import { refetchAll, startEvents } from './stores/events'
+import { useBusyPoll } from './stores/status'
 import { useUiStore } from './stores/ui'
 
 const ui = useUiStore()
 useShortcuts()
+useBusyPoll()
 let stop: (() => void) | undefined
 
 onMounted(() => {

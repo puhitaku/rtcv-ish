@@ -36,6 +36,15 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
   core-host directories via `/api/browse`), game name and frame counter,
   the two global actions Manual Blast and Auto-Corrupt toggle, theme
   toggle. Game Protection: toggle + Back + Last + Now.
+- Stuck emulator: while `Status.busy` is set, a small monospace
+  `<operation> <seconds>s` sits next to the connection status (elapsed
+  time ticks locally from `sinceMs`). When `Status.unresponsive` is true
+  the connection chip turns the warning color, reads "unresponsive" and
+  its tooltip says the emulator stopped answering. In the popover,
+  Disconnect and Quit stay clickable while connected, even when busy or
+  unresponsive (the core never gates them); Quit reads "Quit / kill"
+  when unresponsive or busy for more than 5 s, and its tooltip says the
+  core force-kills a launched emulator that has not exited after 3 s.
 - Left sidebar switches panels. Panels mirror RTCV grids.
 - Bottom: a short log strip fed by `log` events.
 
@@ -139,8 +148,16 @@ directory, log level, About.
 - One Pinia store per resource (`status`, `settings`, `domains`, `stash`,
   `stockpile`, `savestates`, `lists`); the SSE stream triggers refetches.
 - Buttons are disabled (with a tooltip reason) when the emulator is
-  disconnected or no ROM is loaded.
+  disconnected, no ROM is loaded, or it is busy or unresponsive
+  (`needEmu` / `needRom` in the status store include both).
+- Status events are not sent when an operation starts, so while a
+  tracked API call is pending or `busy` is set, the frontend polls
+  `/status` once a second. A missing `unresponsive` counts as false and a
+  missing `busy` as null.
 - Errors from the API show in the log strip and as a transient toast.
+  `BUSY`, `EMULATOR_TIMEOUT` and `EMULATOR_UNRESPONSIVE` read "Emulator is
+  busy: <operation>", "Emulator did not answer in time" and "Emulator is
+  unresponsive; disconnect or quit it", and refresh the status.
 - Everything is keyboard-usable. Global shortcuts (plain single keys, no
   modifiers): `m` Manual Blast, `a` toggle Auto-Corrupt, `p` toggle Game
   Protection, `b` / `l` / `n` Game Protection Back / Last / Now. They run

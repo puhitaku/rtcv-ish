@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { errorMessage } from '@/api/client'
+import { ApiError, errorMessage, STUCK_CODES } from '@/api/client'
 import type { LogLevel } from '@/api/types'
+import { useStatusStore } from './status'
 
 export interface LogEntry {
   id: number
@@ -42,6 +43,11 @@ export const useLogStore = defineStore('log', () => {
     const msg = context ? `${context}: ${errorMessage(e)}` : errorMessage(e)
     add('error', msg)
     toast('error', msg)
+    // Show what the emulator is stuck on in the top bar.
+    if (e instanceof ApiError && STUCK_CODES.has(e.code))
+      void useStatusStore()
+        .poll()
+        .catch(() => {})
   }
 
   function clear() {

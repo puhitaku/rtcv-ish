@@ -161,3 +161,88 @@ describe('TopBar', () => {
     expect(useLogStore().entries.at(-1)?.msg).toBe('game protection: loaded last backup')
   })
 })
+
+describe('TopBar busy / unresponsive', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('shows the busy operation with elapsed seconds and disables operations', async () => {
+    vi.useFakeTimers()
+    mockFetch({})
+    const st = useStatusStore()
+    st.set(statusFixture())
+    const w = mount(TopBar)
+    expect(w.find(tid('busy-indicator')).exists()).toBe(false)
+    expect(w.find(tid('manual-blast')).attributes('disabled')).toBeUndefined()
+
+    st.set(statusFixture({ busy: { operation: 'loadRom', sinceMs: 12_400 } }))
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).text()).toBe('loadRom 12s')
+    const blast = w.find(tid('manual-blast'))
+    expect(blast.attributes('disabled')).toBeDefined()
+    expect(blast.attributes('title')).toBe('Emulator is busy: loadRom')
+    expect(w.find(tid('protection-now')).attributes('disabled')).toBeDefined()
+
+    vi.advanceTimersByTime(2000)
+    st.tick()
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).text()).toBe('loadRom 14s')
+    expect(w.find(tid('emulator-label')).text()).toBe('fake 1')
+
+    st.set(statusFixture())
+    await flushPromises()
+    expect(w.find(tid('busy-indicator')).exists()).toBe(false)
+    expect(w.find(tid('manual-blast')).attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows an unresponsive chip in the warning color', async () => {
+    mockFetch({})
+    const st = useStatusStore()
+    st.set(statusFixture({ unresponsive: true }))
+    const w = mount(TopBar)
+    const chip = w.find(tid('connection-status'))
+    expect(w.find(tid('emulator-label')).text()).toBe('unresponsive')
+    expect(chip.classes()).toContain('text-warn')
+    expect(chip.attributes('title')).toContain('stopped answering')
+    expect(chip.find('.bg-warn').exists()).toBe(true)
+    expect(w.find(tid('manual-blast')).attributes('title')).toBe(
+      'Emulator is unresponsive; disconnect or quit it',
+    )
+  })
+
+  it('keeps Disconnect and Quit / kill clickable while stuck', async () => {
+    const { calls } = mockFetch({
+      'GET /api/emulators': [],
+      'POST /api/emulator/quit': () => undefined,
+      'POST /api/emulator/disconnect': () => statusFixture({ connected: false }),
+    })
+    const st = useStatusStore()
+    st.set(statusFixture({ busy: { operation: 'loadRom', sinceMs: 1000 } }))
+    const w = mount(TopBar)
+    await w.find(tid('connection-status')).trigger('click')
+    await flushPromises()
+
+    const quit = w.find(tid('emu-quit'))
+    expect(quit.text()).toBe('Quit emulator')
+    expect(quit.attributes('disabled')).toBeUndefined()
+    expect(w.find(tid('disconnect-button')).attributes('disabled')).toBeUndefined()
+    expect(w.find(tid('emu-reset')).attributes('disabled')).toBeDefined()
+    expect(w.find(tid('rom-load')).attributes('title')).toBe('Emulator is busy: loadRom')
+
+    st.set(statusFixture({ busy: { operation: 'loadRom', sinceMs: 6000 } }))
+    await flushPromises()
+    expect(quit.text()).toBe('Quit / kill')
+    expect(quit.attributes('title')).toContain('force-kills an emulator it launched')
+    expect(quit.attributes('title')).toContain('3 s')
+
+    st.set(statusFixture({ unresponsive: true }))
+    await flushPromises()
+    expect(quit.text()).toBe('Quit / kill')
+
+    await quit.trigger('click')
+    await w.find(tid('disconnect-button')).trigger('click')
+    await flushPromises()
+    const posts = calls.filter((c) => c.method === 'POST').map((c) => c.path)
+    expect(posts).toEqual(['/api/emulator/quit', '/api/emulator/disconnect'])
+    expect(st.connected).toBe(false)
+  })
+})

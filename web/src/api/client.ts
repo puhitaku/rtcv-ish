@@ -1,4 +1,5 @@
 import createClient from 'openapi-fetch'
+import { ref } from 'vue'
 import type { paths } from './schema'
 
 /** Error raised for non-2xx responses and network failures. */
@@ -35,13 +36,22 @@ function toApiError(body: unknown, status: number): ApiError {
 
 type Result<T> = { data?: T; error?: unknown; response: Response }
 
-/** Awaits an openapi-fetch call and returns its data, or throws ApiError. */
-export async function call<T>(p: Promise<Result<T>>): Promise<T> {
+/** Number of API calls in flight (tracked calls only). */
+export const inflight = ref(0)
+
+/**
+ * Awaits an openapi-fetch call and returns its data, or throws ApiError.
+ * Untracked calls (status polling) do not count in `inflight`.
+ */
+export async function call<T>(p: Promise<Result<T>>, track = true): Promise<T> {
   let r: Result<T>
+  if (track) inflight.value++
   try {
     r = await p
   } catch (e) {
     throw new ApiError(e instanceof Error ? e.message : String(e), 'NETWORK', 0)
+  } finally {
+    if (track) inflight.value--
   }
   if (!r.response.ok || r.error !== undefined) throw toApiError(r.error, r.response.status)
   return r.data as T
@@ -73,9 +83,26 @@ const HINTS: Record<string, string> = {
   NETWORK: 'cannot reach the rtcv-ish core',
 }
 
+/** Codes that mean the emulator (or the core's operation gate) is stuck. */
+export const STUCK_CODES: ReadonlySet<string> = new Set([
+  'BUSY',
+  'EMULATOR_TIMEOUT',
+  'EMULATOR_UNRESPONSIVE',
+])
+
+function busyMessage(msg: string): string {
+  // The core says "another operation is running: <name>".
+  const op = /running: (\S+)\s*$/.exec(msg)?.[1]
+  if (op) return `Emulator is busy: ${op}`
+  return msg ? `Emulator is busy: ${msg}` : 'Emulator is busy'
+}
+
 /** A one-line user message for any error. */
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
+    if (e.code === 'BUSY') return busyMessage(e.message)
+    if (e.code === 'EMULATOR_TIMEOUT') return 'Emulator did not answer in time'
+    if (e.code === 'EMULATOR_UNRESPONSIVE') return 'Emulator is unresponsive; disconnect or quit it'
     const hint = HINTS[e.code]
     if (hint && !e.message.toLowerCase().includes(hint)) return `${e.message} (${hint})`
     return e.message

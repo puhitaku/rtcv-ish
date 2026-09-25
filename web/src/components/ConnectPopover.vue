@@ -17,7 +17,8 @@ const picking = ref(false)
 
 /** Why Load ROM is disabled, or '' when it is available. */
 const loadReason = computed(() => {
-  if (st.needEmu) return `${st.needEmu}: connect or launch an emulator first`
+  if (!st.connected) return 'Emulator not connected: connect or launch an emulator first'
+  if (st.needEmu) return st.needEmu
   if (!rom.value) return 'Enter a ROM path or use Browse…'
   if (busy.value) return 'Busy'
   return ''
@@ -39,6 +40,13 @@ async function run(fn: () => Promise<unknown>, ok: string) {
   await act(fn, ok)
   busy.value = false
 }
+
+const quitLabel = computed(() => (st.stuck ? 'Quit / kill' : 'Quit emulator'))
+const quitTitle = computed(() => {
+  if (!st.connected) return 'Emulator not connected'
+  const kill = 'the core force-kills an emulator it launched if it has not exited after 3 s'
+  return st.stuck ? `Ask the emulator to quit; ${kill}` : `Ask the emulator to quit (${kill})`
+})
 
 onMounted(() => void act(() => st.fetchEmulators()))
 </script>
@@ -73,9 +81,12 @@ onMounted(() => void act(() => st.fetchEmulators()))
         <button
           class="btn"
           type="button"
-          :disabled="busy || !st.connected"
+          :disabled="!st.connected"
+          :title="
+            st.connected ? 'Disconnect (works while the emulator is busy or unresponsive)' : ''
+          "
           data-testid="disconnect-button"
-          @click="run(() => st.disconnect(), 'disconnected')"
+          @click="act(() => st.disconnect(), 'disconnected')"
         >
           Disconnect
         </button>
@@ -179,12 +190,13 @@ onMounted(() => void act(() => st.fetchEmulators()))
       </button>
       <button
         class="btn"
-        :disabled="!!st.needEmu"
-        :title="st.needEmu"
+        :class="{ 'border-warn text-warn': st.stuck }"
+        :disabled="!st.connected"
+        :title="quitTitle"
         data-testid="emu-quit"
-        @click="run(() => st.quit(), 'quit sent')"
+        @click="act(() => st.quit(), 'quit sent')"
       >
-        Quit emulator
+        {{ quitLabel }}
       </button>
     </section>
   </div>

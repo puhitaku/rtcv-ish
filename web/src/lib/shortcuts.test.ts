@@ -125,4 +125,14 @@ describe('useShortcuts', () => {
     await press('p')
     expect(calls).toHaveLength(1)
   })
+
+  it('skips emulator actions while busy or unresponsive', async () => {
+    const { calls } = setup()
+    const st = useStatusStore()
+    st.set(statusFixture({ protectionBackups: 1, busy: { operation: 'loadRom', sinceMs: 0 } }))
+    for (const k of ['m', 'b', 'l', 'n']) await press(k)
+    st.set(statusFixture({ protectionBackups: 1, unresponsive: true }))
+    for (const k of ['m', 'b', 'l', 'n']) await press(k)
+    expect(paths(calls)).toEqual([])
+  })
 })

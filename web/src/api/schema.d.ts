@@ -990,6 +990,8 @@ export interface components {
             version: string;
             dataDir: string;
             connected: boolean;
+            /** @description The connected emulator did not answer a call in time. Operations fail with `EMULATOR_UNRESPONSIVE` until a ping succeeds; disconnect and quit still work. */
+            unresponsive: boolean;
             /** @description Emulator API address; empty when disconnected. */
             address: string;
             /** @description Present while connected. */
@@ -999,6 +1001,20 @@ export interface components {
             /** @description Number of game protection backups held. */
             protectionBackups: number;
             blastLayer: components["schemas"]["BlastLayerState"];
+            /** @description The core operation currently running, if any. */
+            busy?: components["schemas"]["BusyStatus"];
+        };
+        BusyStatus: {
+            /**
+             * @description Operation name, e.g. `loadRom`, `blast`, `protectionBackup`.
+             * @example loadRom
+             */
+            operation: string;
+            /**
+             * Format: int64
+             * @description Milliseconds the operation has been running.
+             */
+            sinceMs: number;
         };
         BlastLayerState: {
             /** @description A layer was applied with backup, so it can be toggled. */

@@ -63,6 +63,7 @@ export function statusFixture(over: Partial<Status> = {}): Status {
     version: 'test',
     dataDir: '/tmp/data',
     connected: true,
+    unresponsive: false,
     address: '127.0.0.1:42069',
     emulator: {
       name: 'fake',

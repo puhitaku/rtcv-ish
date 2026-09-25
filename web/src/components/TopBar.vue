@@ -22,9 +22,27 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onDown))
 
 const emuLabel = computed(() => {
   if (!st.connected) return 'disconnected'
+  if (st.unresponsive) return 'unresponsive'
   const e = st.status?.emulator
   return e ? `${e.name} ${e.version}` : 'connected'
 })
+
+const dotClass = computed(() => {
+  if (st.unresponsive) return 'bg-warn'
+  if (st.connected) return 'bg-ok'
+  return st.live ? 'bg-warn' : 'bg-err'
+})
+
+const connTitle = computed(() =>
+  st.unresponsive
+    ? 'The emulator stopped answering API calls. Operations fail until it responds again; ' +
+      'open this menu to disconnect or quit it.'
+    : 'Connect, launch or control the emulator',
+)
+
+const busyLabel = computed(() =>
+  st.busy ? `${st.busy.operation} ${Math.floor(st.busyMs / 1000)}s` : '',
+)
 
 const gameLabel = computed(() => {
   const g = st.game
@@ -47,18 +65,26 @@ const themeLabel = computed(() => ({ system: 'Auto', light: 'Light', dark: 'Dark
     <div ref="root" class="relative">
       <button
         class="btn"
+        :class="{ 'border-warn text-warn': st.unresponsive }"
         :aria-expanded="open"
+        :title="connTitle"
         data-testid="connection-status"
         @click="open = !open"
       >
-        <span
-          class="inline-block h-2 w-2 rounded-full"
-          :class="st.connected ? 'bg-ok' : st.live ? 'bg-warn' : 'bg-err'"
-        />
+        <span class="inline-block h-2 w-2 rounded-full" :class="dotClass" />
         <span data-testid="emulator-label">{{ emuLabel }}</span>
       </button>
       <ConnectPopover v-if="open" @close="open = false" />
     </div>
+
+    <span
+      v-if="st.busy"
+      class="font-mono text-xs text-dim"
+      :title="`The core is running ${st.busy.operation}; new operations wait or fail with BUSY`"
+      data-testid="busy-indicator"
+    >
+      {{ busyLabel }}
+    </span>
 
     <span class="flex items-center gap-1" :title="st.game?.romPath">
       <span class="lbl">game</span>
