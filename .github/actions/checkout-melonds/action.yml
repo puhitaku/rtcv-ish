@@ -1,0 +1,20 @@
+name: Check out melonDS
+description: >
+  Checks out only the emulators/melonds submodule over HTTPS (the other
+  submodules are large references that builds do not need) and exports the
+  build info variables melonDS embeds with MELONDS_EMBED_BUILD_INFO.
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the melonDS submodule
+      shell: bash
+      run: |
+        # .gitmodules uses an SSH URL; the submodule is named references/melonds.
+        git config submodule.references/melonds.url https://github.com/puhitaku/melonDS.git
+        git submodule update --init --depth 1 emulators/melonds
+        {
+          echo "MELONDS_GIT_BRANCH=rtcv-ish"
+          echo "MELONDS_GIT_HASH=$(git -C emulators/melonds rev-parse HEAD)"
+          echo "MELONDS_BUILD_PROVIDER=rtcv-ish GitHub Actions"
+        } >> "$GITHUB_ENV"

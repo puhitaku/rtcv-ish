@@ -1,0 +1,351 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - "ci-*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compute version
+        id: version
+        run: |
+          if [[ $GITHUB_REF_TYPE == tag ]]; then
+            version=$GITHUB_REF_NAME
+          else
+            version="${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+      - name: Check the changelog section
+        if: github.ref_type == 'tag'
+        run: ./scripts/changelog-section.sh "$GITHUB_REF_NAME"
+
+  core:
+    name: Core
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        if: hashFiles('web/package.json') != ''
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web frontend
+        if: hashFiles('web/package.json') != ''
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          build() {
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "bin/$1-$2/$3" ./cmd/rtcv-ish
+          }
+          build linux amd64 rtcv-ish
+          build darwin amd64 rtcv-ish
+          build darwin arm64 rtcv-ish
+          build windows amd64 rtcv-ish.exe
+          tar -cf core.tar -C bin .
+          tar -tvf core.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: core
+          path: core.tar
+          retention-days: 1
+
+  melonds-linux:
+    name: melonDS Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/checkout-melonds
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install --allow-downgrades cmake ninja-build extra-cmake-modules libpcap0.8-dev libsdl2-dev libenet-dev \
+            qt6-{base,base-private,multimedia}-dev qt6-wayland libqt6svg6-dev libarchive-dev libzstd-dev libfuse2 libfaad-dev
+      - name: Configure
+        working-directory: emulators/melonds
+        run: cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DMELONDS_EMBED_BUILD_INFO=ON
+      - name: Build
+        working-directory: emulators/melonds
+        run: |
+          cmake --build build
+          DESTDIR=AppDir cmake --install build
+      - name: Fetch AppImage tools
+        working-directory: emulators/melonds
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod a+x linuxdeploy-*.AppImage
+      - name: Build the AppImage
+        working-directory: emulators/melonds
+        env:
+          EXTRA_PLATFORM_PLUGINS: libqwayland-egl.so;libqwayland-generic.so
+          EXTRA_QT_PLUGINS: waylandcompositor
+          QMAKE: /usr/lib/qt6/bin/qmake
+        run: ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+      - name: Archive
+        run: |
+          mkdir out
+          mv emulators/melonds/melonDS*.AppImage out/melonDS.AppImage
+          cp emulators/melonds/LICENSE out/
+          tar -cf melonds-linux-x86_64.tar -C out .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: melonds-linux-x86_64
+          path: melonds-linux-x86_64.tar
+          retention-days: 1
+
+  melonds-macos:
+    name: melonDS macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    runs-on: macos-26
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/checkout-melonds
+      - name: Install dependencies for package building
+        run: brew install autoconf automake autoconf-archive libtool python-setuptools
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+      # Upstream's vcpkg cache scheme, but saved under a per-run key (also on
+      # failure) so that packages built by a failed run are not rebuilt.
+      - name: Restore vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-${{ matrix.arch }}-osx-${{ hashFiles('emulators/melonds/vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ matrix.arch }}-osx-${{ hashFiles('emulators/melonds/vcpkg.json') }}-
+            vcpkg-${{ matrix.arch }}-osx-
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/emulators/melonds/vcpkg
+          vcpkgJsonGlob: emulators/melonds/vcpkg.json
+      - name: Build
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: ${{ github.workspace }}/emulators/melonds/CMakeLists.txt
+          configurePreset: release-mac-${{ matrix.arch }}
+          buildPreset: release-mac-${{ matrix.arch }}
+          configurePresetAdditionalArgs: "['-DMELONDS_EMBED_BUILD_INFO=ON']"
+      - name: Archive
+        run: |
+          mkdir out
+          cp -a emulators/melonds/build/release-mac-${{ matrix.arch }}/melonDS.app emulators/melonds/LICENSE out/
+          tar -cf melonds-macos-${{ matrix.arch }}.tar -C out .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: melonds-macos-${{ matrix.arch }}
+          path: melonds-macos-${{ matrix.arch }}.tar
+          retention-days: 1
+      - name: Save vcpkg cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-${{ matrix.arch }}-osx-${{ hashFiles('emulators/melonds/vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  melonds-windows:
+    name: melonDS Windows x86_64
+    runs-on: windows-2025-vs2026
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/checkout-melonds
+      - name: Restore vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('emulators/melonds/vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-x86_64-windows-${{ hashFiles('emulators/melonds/vcpkg.json') }}-
+            vcpkg-x86_64-windows-
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/emulators/melonds/vcpkg
+          vcpkgJsonGlob: emulators/melonds/vcpkg.json
+      - name: Build
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: ${{ github.workspace }}/emulators/melonds/CMakeLists.txt
+          configurePreset: release-windows-x86_64
+          configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DMELONDS_EMBED_BUILD_INFO=ON']"
+          buildPreset: release-windows-x86_64
+      - name: Archive
+        shell: bash
+        run: |
+          mkdir out
+          cp emulators/melonds/build/release-windows-x86_64/melonDS.exe emulators/melonds/LICENSE out/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: melonds-windows-x86_64
+          path: out/
+          retention-days: 1
+      - name: Save vcpkg cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('emulators/melonds/vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  package-linux:
+    name: Package Linux
+    needs: [version, core, melonds-linux]
+    runs-on: ubuntu-latest
+    env:
+      NAME: rtcv-ish-${{ needs.version.outputs.version }}-linux-x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: core
+          path: in
+      - uses: actions/download-artifact@v8
+        with:
+          name: melonds-linux-x86_64
+          path: in
+      - name: Package
+        run: |
+          mkdir -p in/core "$NAME/emulators/melonds"
+          tar -xf in/core.tar -C in/core
+          tar -xf in/melonds-linux-x86_64.tar -C "$NAME/emulators/melonds"
+          cp in/core/linux-amd64/rtcv-ish README.md LICENSE "$NAME/"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          tar -tvzf "$NAME.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.NAME }}.tar.gz
+          archive: false
+
+  package-macos:
+    name: Package macOS
+    needs: [version, core, melonds-macos]
+    runs-on: macos-26
+    env:
+      NAME: rtcv-ish-${{ needs.version.outputs.version }}-macos-universal
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: core
+          path: in
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: melonds-macos-*
+          path: in
+          merge-multiple: true
+      - name: Package
+        run: |
+          mkdir -p in/core in/x86_64 in/arm64 "$NAME/emulators/melonds"
+          tar -xf in/core.tar -C in/core
+          tar -xf in/melonds-macos-x86_64.tar -C in/x86_64
+          tar -xf in/melonds-macos-arm64.tar -C in/arm64
+
+          lipo -create in/core/darwin-amd64/rtcv-ish in/core/darwin-arm64/rtcv-ish -output "$NAME/rtcv-ish"
+          codesign --force -s - "$NAME/rtcv-ish"
+
+          app="$NAME/emulators/melonds/melonDS.app"
+          cp -a in/arm64/melonDS.app "$app"
+          lipo -create in/x86_64/melonDS.app/Contents/MacOS/melonDS in/arm64/melonDS.app/Contents/MacOS/melonDS \
+            -output "$app/Contents/MacOS/melonDS"
+          codesign --force -s - --deep "$app"
+          cp in/arm64/LICENSE "$NAME/emulators/melonds/"
+
+          cp README.md LICENSE "$NAME/"
+          lipo -info "$NAME/rtcv-ish" "$app/Contents/MacOS/melonDS"
+          ditto -c -k --sequesterRsrc --keepParent "$NAME" "$NAME.zip"
+          unzip -l "$NAME.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.NAME }}.zip
+          archive: false
+
+  package-windows:
+    name: Package Windows
+    needs: [version, core, melonds-windows]
+    runs-on: ubuntu-latest
+    env:
+      NAME: rtcv-ish-${{ needs.version.outputs.version }}-windows-x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: core
+          path: in
+      - uses: actions/download-artifact@v8
+        with:
+          name: melonds-windows-x86_64
+          path: in/melonds
+      - name: Package
+        run: |
+          mkdir -p in/core "$NAME/emulators/melonds"
+          tar -xf in/core.tar -C in/core
+          cp in/core/windows-amd64/rtcv-ish.exe README.md LICENSE "$NAME/"
+          cp in/melonds/melonDS.exe in/melonds/LICENSE "$NAME/emulators/melonds/"
+          zip -r "$NAME.zip" "$NAME"
+          unzip -l "$NAME.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.NAME }}.zip
+          archive: false
+
+  release:
+    name: Release
+    if: github.ref_type == 'tag'
+    needs: [package-linux, package-macos, package-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rtcv-ish-*
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          ./scripts/changelog-section.sh "$TAG" > notes.md
+          flags=()
+          if [[ $TAG == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}" dist/*
