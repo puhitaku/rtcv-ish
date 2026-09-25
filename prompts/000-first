@@ -1,0 +1,95 @@
+This repository, rtcv-ish, will contain a multi-OS alternative of RTCV (Real-Time Corruptor Vanguard). Read the following and develop the tool.
+
+
+# Background
+
+The original RTCV is a funny tool to play games in unusual way, but it works only on Windows. I use macOS and Linux, not Windows. RTCV invokes emulators specially modified to work with RTCV. Injecting corruptions for each address range, hooking, etc. The modification tightly depends on Windows too.
+
+By using a Web frontend and IP-based communication, it should be able to implement them OS-agnostic.
+
+So the goal is to:
+
+- Implement a Web based frontend + backend that implements all equivalent feature RTCV has
+- Implement a core server that serves the frontend and communicates with frontend and emulators
+- Implement an IP-based API contained in emulators to control them from the core server
+- Write a CI pipeline to build everything into an archive and release it
+- Release rtcv-ish for Windows, macOS, and Linux
+
+
+# Rule
+
+- Write all newly-created tools in Go
+- Stick to a generic OSS coding styles; minimize and write comments if it's necessary, not writing nice-to-have explanations
+- Format all the code with tools.
+- Testing harness is important, but let the testing code reside in rtcv-ish side, not in the forked emulators; emulators' API should provide enough operations for testing and debugging purpose
+- Commits must be separated semantically; a commit will have diffs to implement/improve/fix a feature.
+   - In the very early stage of development, fine-grained commits sometimes don't make sense. So the commits can be coarser in that case.
+- It's basically a hacker's tool. Simple and slick design is favorable. Don't use gradients. Avoid AI-slop design.
+- Invoke Opus sub-agents to do implementation. The main agent (you) must focus on supervising and reviewing.
+
+
+# Design and implement
+
+- First thing first, we begin with melonDS, a Nintendo DS(i) emulator. I will add other emulators later. 
+- The upcoming design and notes in /design directory.
+- For tests, if it's necessary to run an actual ROM on a melonDS instance, you can use open ROMs in /references/nds-examples and test specific run and corruption.
+- Write and update AGENTS.md occasionally. It must be short enough not to spend the context size too much, but enough for coding agents to understand the repository's structure and all rules.
+
+The relationship of each components will be like:
+
+| Web Frontend | <-- Frontend API --> | Core | <-- Emulator API --> | Emulator(s) |
+
+
+## Planning and design phase
+
+- Read the code of RTCV (/references/rtcv) and its special fork of melonDS (/references/melonds50x-vanguard).
+- Record what's done in RTCV and between RTCV and emulators. It will be a reference to design the upcoming Emulator API.
+- Design and record the directory structure of this repository. It has to be easy to understand since it's an OSS.
+- Design and record the Emulator API design between the core server and emulators (melonDS, at present).
+   - I have no strict opinion on which API to use, but it has to be OS-agnostic. So IP-based API will suffice our need.
+   - Don't reinvent a wheel for RPC.
+   - For the RPC layer, any RPC can be used (e.g. gRPC) but focus on performance, explicit and stable signature declaration, and minimal dependency (for example, REST API will take longer time to parse payload, larger buffer, ... so I think it won't suit our need).
+- Design and record the Frontend API design. The API should be a REST API. Frontend and server share a single OpenAPI spec file.
+- Design and record the frontend appearance. Imitate the RTCV's GUI design. I mean "equivalent", neither strict nor pixel-perfect.
+   - Auto light- and dark-mode switch.
+
+
+## Implementation and testing phase
+
+- Create the core server command and write tests for communications between core and emulators. All test cases will fail since there has been no implementation yet.
+   - The core server's executable will be named rtcv-ish.
+   - When it's executed, it will show the Web endpoint to open with a browser.
+   - For logging, use log/slog + github.com/lmittmann/tint. Show JSON line logs for testing and logging without tty. Show human-readable and colored logs for usual usecase (with tty).
+   - Use signal.NotifyContext for the root of context. Pass it and derived context to other goroutines and let them cancel tasks gracefully.
+   - Consider context, error, and cancellation carefully. For example, use github.com/sasha-s/go-deadlock to detect deadlocks on runtime.
+- Implement the emulator API server in melonDS.
+   - `/emulators/melonds` is my fork of melonDS. Create a branch named `rtcv-ish` and commit everything on that.
+   - The API (RPC) server thread should reside in the emulator's process without degrading the performance.
+   - Since the emulator's core and the API runs asynchronously, the communication between them must consider thread-safety.
+   - Pass all test cases. Add/delete/improve test cases occasionally.
+- Write tests for communications between core and browser (frontend). All test cases has to fail since there has been no implementation yet.
+- Implement the Frontend API server in the core server command. All test cases will now be green.
+   - For test cases that use RNG (e.g. N times of manual blast on random address), use a deterministic RNG that Go has. So, the core must be able to accept a specific feed (for testing) in go test or a generic time seed.
+- Implement the frontend.
+   - Use Vue 3, Vite, Pinia, TS and formatter, Tailwind CSS, and Playwright. Focus on a simple, but stable and testable frontend.
+   - Embed the resulting frontend into rtcv-ish's server.
+   - Implement unit test on the frontend.
+- Integrate everything and do an E2E test.
+- Update the LICENSE file to include all referenced OSSes.
+   - I seriously respect the author of RTCV, emulators, and all OSSes we've learned things from.
+   - I've added an example for RTCV's melonDS fork. Its README and LICENSE states that it's licensed under either GPL v3 or any later version, so the SPDX identifier for melonDS is `GPL-3.0-or-later`.
+   - Don't infer the SPDX ID. Search for the actual value from https://spdx.github.io/license-list-data/ .
+- Update the README.md.
+   - The contents should be very simple and brief.
+   - It will descibe what rtcv-ish is, how to install (navigate to the releases page in GitHub), and how to use it.
+
+
+## Release phase
+
+- Implement a CI pipeline to release rtcv-ish for each OS.
+   - The release archive must contain all emulators so that users can use it out-of-the-box (after configuring necessary BIOS or something dumped by the user)
+   - Trigger a release build on tag push for tags named like v* (e.g. v1.0.0). For implementing and enhancing CI pipeline, a branch push for branches named like `ci-*` will also trigger a release build.
+   - A tag release's description must contain a brief list of What's New. It means that you have to compose the release's body, not generating a commit list. Commit list is too verbose and doesn't make sense.
+   - Use GitHub CLI (gh) to monitor and observe the pipeline's progress.
+- Release v1.0.0-rc1.
+
