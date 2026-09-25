@@ -55,7 +55,9 @@ unit tests, Playwright for E2E, Prettier + ESLint. Generated API types from
 Three columns like RTCV's Engine Config grid:
 
 1. General parameters: Intensity (slider + number, non-linear slider
-   scale, uncapped number), Error Delay (same), Blast Radius select.
+   scale, uncapped number), Error Delay (same), Blast Radius select,
+   Address range (enable checkbox, hex start and exclusive end, disabled
+   while off, and a hint with the range size or the validation error).
 2. Corruption engine: engine select, precision select (8/16/32/64-bit),
    alignment number, and an engine-specific parameter block:
    - Nightmare: algo (Random / Random Tilt / Tilt), min/max for the
@@ -105,6 +107,22 @@ Disabled, Enable/Disable everything, Remove selected, Duplicate, Add row,
 Shift selected (field + amount), Load + Corrupt, Apply Corruption, Send
 to Stash, To Stockpile, Bake to VALUE, Break down, Sanitize duplicates,
 Load/Save `.bl`. Layer size label.
+
+- Help: every property label and checkbox, and every column header, has a
+  tooltip panel (hover or keyboard focus, short delay, Escape closes)
+  with one or two sentences from RTCV's semantics. The texts live in one
+  table, `web/src/lib/fieldHelp.ts`; the panel is `ui/HelpTip.vue`.
+- Number base: Address, Source Address, Precision, Tilt, Execute Frame,
+  Lifetime and Loop Timing have a hex/dec toggle next to their input
+  (defaults: addresses hex, the rest decimal). The choice is per field,
+  persisted in localStorage (`rtcvish.fieldBases`), and the table uses it
+  too. Hex input takes an optional `0x` prefix in either case; the API
+  always gets numbers (tilt a decimal string).
+- Column widths are capped in characters (Value 16, Note 24, others
+  smaller); longer text is cut with an ellipsis and the cell's `title`
+  holds the full text, so a large precision never widens the table. A
+  filler column takes the slack; the pane scrolls horizontally only when
+  the capped columns do not fit.
 
 ### Memory / Hex
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"math/rand/v2"
@@ -384,37 +385,60 @@ func (u *Unit) reroll(rng *rand.Rand, s *Settings, selected []string, mem Memory
 			u.Value = FullRange().value(rng, p)
 		}
 	}
-	pick := func() (string, error) {
+	// With an address range, only domains that fit the unit inside the
+	// range are picked and addresses stay inside it; a domain or address
+	// with no room is left unchanged.
+	pick := func(cur string) (string, error) {
 		if len(selected) == 0 {
 			return "", ErrNoDomains
 		}
-		return selected[rng.IntN(len(selected))], nil
+		if !s.AddressRange.Enabled {
+			return selected[rng.IntN(len(selected))], nil
+		}
+		var names []string
+		for _, name := range selected {
+			if d, ok := findDomain(mem, name); ok {
+				if lo, hi := s.AddressRange.window(d.Size); hi-lo >= int64(p) {
+					names = append(names, name)
+				}
+			}
+		}
+		if len(names) == 0 {
+			slog.Debug("reroll: address range does not intersect any selected domain")
+			return cur, nil
+		}
+		return names[rng.IntN(len(names))], nil
 	}
-	addr := func(domain string) (uint64, error) {
+	addr := func(domain string, cur uint64) (uint64, error) {
 		d, ok := findDomain(mem, domain)
 		if !ok {
 			return 0, fmt.Errorf("%w %q", ErrUnknownDomain, domain)
 		}
-		return uint64(randomAddress(rng, int64(d.Size)-int64(p)+1)), nil
+		lo, hi := s.AddressRange.window(d.Size)
+		if s.AddressRange.Enabled && hi-lo < int64(p) {
+			slog.Debug("reroll: domain outside the address range", "domain", domain)
+			return cur, nil
+		}
+		return uint64(lo + randomAddress(rng, hi-lo-int64(p)+1)), nil
 	}
 	var err error
 	if u.Source == SourceStore && s.Reroll.SourceDomain {
-		if u.SourceDomain, err = pick(); err != nil {
+		if u.SourceDomain, err = pick(u.SourceDomain); err != nil {
 			return err
 		}
 	}
 	if u.Source == SourceStore && s.Reroll.SourceAddress {
-		if u.SourceAddress, err = addr(u.SourceDomain); err != nil {
+		if u.SourceAddress, err = addr(u.SourceDomain, u.SourceAddress); err != nil {
 			return err
 		}
 	}
 	if s.Reroll.Domain {
-		if u.Domain, err = pick(); err != nil {
+		if u.Domain, err = pick(u.Domain); err != nil {
 			return err
 		}
 	}
 	if s.Reroll.Address {
-		if u.Address, err = addr(u.Domain); err != nil {
+		if u.Address, err = addr(u.Domain, u.Address); err != nil {
 			return err
 		}
 	}

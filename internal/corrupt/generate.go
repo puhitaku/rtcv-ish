@@ -21,9 +21,12 @@ type generator struct {
 	s        *Settings
 	mem      Memory
 	selected []Domain
-	domains  map[string]Domain
-	calls    int
-	layer    *Layer
+	// usable are the selected domains whose address window (see
+	// AddressRange) fits a unit; all selected domains without a range.
+	usable  []Domain
+	domains map[string]Domain
+	calls   int
+	layer   *Layer
 
 	limiter *lists.List
 	values  *lists.List
@@ -38,6 +41,10 @@ func Generate(ctx context.Context, rng *rand.Rand, s *Settings, selected []strin
 	g, err := newGenerator(ctx, rng, s, selected, mem, reg)
 	if err != nil {
 		return nil, err
+	}
+	if len(g.usable) == 0 {
+		slog.InfoContext(ctx, "address range does not intersect any selected domain", "start", s.AddressRange.Start, "end", s.AddressRange.End)
+		return g.layer, nil
 	}
 	intensity := s.Intensity
 	if s.infinite() {
@@ -76,7 +83,82 @@ func newGenerator(ctx context.Context, rng *rand.Rand, s *Settings, selected []s
 	if err := g.resolveLists(reg); err != nil {
 		return nil, err
 	}
+	g.usable = usableDomains(s, g.selected, g.unitSize())
 	return g, nil
+}
+
+// unitSize is the number of bytes one generated unit (or cluster chunk)
+// covers.
+func (g *generator) unitSize() int {
+	switch {
+	case g.s.Engine == EngineVector && !g.s.Vector.UnlockPrecision:
+		return g.limiter.Precision()
+	case g.s.Engine == EngineCluster:
+		return g.limiter.Precision() * g.s.Cluster.ChunkSize
+	}
+	return g.s.Precision
+}
+
+// usableDomains filters the domains to those whose address window holds
+// at least n bytes. Without an address range every domain is usable.
+func usableDomains(s *Settings, domains []Domain, n int) []Domain {
+	if !s.AddressRange.Enabled {
+		return domains
+	}
+	var out []Domain
+	for _, d := range domains {
+		lo, hi := s.AddressRange.window(d.Size)
+		if hi-lo < int64(n) {
+			slog.Debug("domain outside the address range", "domain", d.Name, "size", d.Size, "start", s.AddressRange.Start, "end", s.AddressRange.End)
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// AddressRangeMisses reports whether the address range is enabled and no
+// selected domain has room for a unit inside it, in which case Generate
+// returns an empty layer.
+func AddressRangeMisses(s *Settings, selected []string, mem Memory) bool {
+	if !s.AddressRange.Enabled {
+		return false
+	}
+	var doms []Domain
+	for _, name := range selected {
+		if d, ok := findDomain(mem, name); ok {
+			doms = append(doms, d)
+		}
+	}
+	return len(usableDomains(s, doms, s.Precision)) == 0
+}
+
+// window is the address window of d: [0, size) or its intersection with
+// the address range.
+func (g *generator) window(d Domain) (lo, hi int64) { return g.s.AddressRange.window(d.Size) }
+
+// align is safeAddress for a unit of p bytes. With an address range the
+// result stays inside the domain's window.
+func (g *generator) align(d Domain, addr int64, p int) (uint64, bool) {
+	if !g.s.AddressRange.Enabled {
+		return safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	}
+	lo, hi := g.window(d)
+	return alignIn(addr, lo, hi, int64(p), int64(g.s.Alignment), int64(p))
+}
+
+// alignIn aligns addr like safeAddress (down to p, plus a) and then moves
+// it by whole multiples of p until [s, s+n) lies within [lo, hi): up if
+// it starts below lo, down if it ends past hi.
+func alignIn(addr, lo, hi, p, a, n int64) (uint64, bool) {
+	s := addr - addr%p + a
+	if s < lo {
+		s += (lo - s + p - 1) / p * p
+	}
+	if s+n > hi {
+		s -= (s + n - hi + p - 1) / p * p
+	}
+	return uint64(max(s, 0)), s >= lo && s+n <= hi
 }
 
 func (g *generator) resolveLists(reg *lists.Registry) error {
@@ -118,10 +200,16 @@ func (g *generator) resolveLists(reg *lists.Registry) error {
 
 func (g *generator) run(intensity int) error {
 	p := int64(g.s.Precision)
-	sel := g.selected
+	sel := g.usable
+	// size is the window size, the domain size without an address range.
+	size := func(d Domain) uint64 {
+		lo, hi := g.window(d)
+		return uint64(hi - lo)
+	}
 	blastIn := func(d Domain, n int) error {
+		lo, hi := g.window(d)
 		for range n {
-			if err := g.blast(d, randomAddress(g.rng, int64(d.Size)-p)); err != nil {
+			if err := g.blast(d, lo+randomAddress(g.rng, hi-lo-p)); err != nil {
 				return err
 			}
 		}
@@ -144,21 +232,21 @@ func (g *generator) run(intensity int) error {
 		}
 	case RadiusNormalized:
 		sorted := slices.Clone(sel)
-		slices.SortStableFunc(sorted, func(a, b Domain) int { return cmp.Compare(a.Size, b.Size) })
-		largest := sorted[len(sorted)-1].Size
+		slices.SortStableFunc(sorted, func(a, b Domain) int { return cmp.Compare(size(a), size(b)) })
+		largest := size(sorted[len(sorted)-1])
 		for _, d := range sorted {
-			if err := blastIn(d, intensity/int(largest/d.Size)); err != nil {
+			if err := blastIn(d, intensity/int(largest/size(d))); err != nil {
 				return err
 			}
 		}
 	case RadiusProportional:
 		var total float64
 		for _, d := range sel {
-			total += float64(d.Size)
+			total += float64(size(d))
 		}
 		counts := make([]int, len(sel))
 		for i, d := range sel {
-			counts[i] = int(math.RoundToEven(float64(intensity) * (float64(d.Size) / total)))
+			counts[i] = int(math.RoundToEven(float64(intensity) * (float64(size(d)) / total)))
 		}
 		for i, d := range sel {
 			if err := blastIn(d, counts[i]); err != nil {
@@ -224,10 +312,11 @@ type target struct {
 }
 
 // blastTarget is RTCV's GetBlastTarget: a random selected domain and a
-// random address in it.
+// random address in it (in its address window).
 func (g *generator) blastTarget() target {
-	d := g.selected[g.rng.IntN(len(g.selected))]
-	return target{d, randomAddress(g.rng, int64(d.Size)-1)}
+	d := g.usable[g.rng.IntN(len(g.usable))]
+	lo, hi := g.window(d)
+	return target{d, lo + randomAddress(g.rng, hi-lo-1)}
 }
 
 func (g *generator) nightmare(d Domain, addr int64) []*Unit {
@@ -244,7 +333,7 @@ func (g *generator) nightmare(d Domain, addr int64) []*Unit {
 		typ = [...]int{add, sub}[g.rng.IntN(2)]
 	}
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
 	if !ok {
 		return nil
 	}
@@ -258,7 +347,7 @@ func (g *generator) nightmare(d Domain, addr int64) []*Unit {
 
 func (g *generator) hellgenie(d Domain, addr int64) []*Unit {
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
 	if !ok {
 		return nil
 	}
@@ -267,7 +356,7 @@ func (g *generator) hellgenie(d Domain, addr int64) []*Unit {
 
 func (g *generator) distortion(d Domain, addr int64) []*Unit {
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
 	if !ok {
 		return nil
 	}
@@ -276,7 +365,7 @@ func (g *generator) distortion(d Domain, addr int64) []*Unit {
 
 func (g *generator) freeze(d Domain, addr int64) []*Unit {
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
 	if !ok {
 		return nil
 	}
@@ -286,8 +375,8 @@ func (g *generator) freeze(d Domain, addr int64) []*Unit {
 func (g *generator) pipe(d Domain, addr int64) []*Unit {
 	start := g.blastTarget()
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
-	src, srcOK := safeAddress(start.addr, int64(start.d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
+	src, srcOK := g.align(start.d, start.addr, p)
 	if !ok || !srcOK {
 		return nil
 	}
@@ -322,7 +411,14 @@ func (g *generator) vector(d Domain, addr int64) ([]*Unit, error) {
 	}
 	size := int64(d.Size)
 	safe := addr - addr%int64(p) + int64(g.s.Alignment)
-	if safe >= size-int64(p) {
+	if g.s.AddressRange.Enabled {
+		lo, hi := g.window(d)
+		s, ok := alignIn(addr, lo, hi, int64(p), int64(g.s.Alignment), int64(p))
+		if !ok {
+			return nil, nil
+		}
+		safe = int64(s)
+	} else if safe >= size-int64(p) {
 		safe = size - 2*int64(p) + int64(g.s.Alignment)
 	}
 	hit, err := g.limited(g.limiter, d, safe, p)
@@ -339,11 +435,20 @@ func (g *generator) cluster(d Domain, addr int64) ([]*Unit, error) {
 	p := g.limiter.Precision()
 	size := int64(d.Size)
 	safe := addr - addr%int64(p) + int64(g.s.Alignment)
-	if safe > size-int64(p) {
-		safe = size - 2*int64(p) + int64(g.s.Alignment)
-	}
-	if safe < 0 || safe+int64(c.ChunkSize*p) >= size {
-		return nil, nil
+	if g.s.AddressRange.Enabled {
+		lo, hi := g.window(d)
+		s, ok := alignIn(addr, lo, hi, int64(p), int64(g.s.Alignment), int64(c.ChunkSize*p))
+		if !ok {
+			return nil, nil
+		}
+		safe = int64(s)
+	} else {
+		if safe > size-int64(p) {
+			safe = size - 2*int64(p) + int64(g.s.Alignment)
+		}
+		if safe < 0 || safe+int64(c.ChunkSize*p) >= size {
+			return nil, nil
+		}
 	}
 	raw, err := g.mem.Read(g.ctx, d.Name, uint64(safe), c.ChunkSize*p)
 	if err != nil {
@@ -417,7 +522,7 @@ func shuffleCluster(rng *rand.Rand, segs [][]byte, method ClusterMethod, modifie
 func (g *generator) custom(d Domain, addr int64) ([]*Unit, error) {
 	c := g.s.Custom
 	p := g.s.Precision
-	safe, ok := safeAddress(addr, int64(d.Size), p, g.s.Alignment)
+	safe, ok := g.align(d, addr, p)
 	if !ok {
 		return nil, nil
 	}
@@ -437,16 +542,11 @@ func (g *generator) custom(d Domain, addr int64) ([]*Unit, error) {
 		u.StoreTime = c.StoreTime
 		if c.StoreAddress == StoreAddressRandom {
 			bt := g.blastTarget()
-			bs := int64(bt.d.Size)
-			pp, a := int64(p), int64(g.s.Alignment)
-			s := bt.addr - bt.addr%pp + a
-			if s > bs-pp {
-				s = bs - 2*pp + a
-			}
-			if s < 0 || s+pp > bs {
+			s, ok := g.align(bt.d, bt.addr, p)
+			if !ok {
 				return nil, nil
 			}
-			u.SourceDomain, u.SourceAddress = bt.d.Name, uint64(s)
+			u.SourceDomain, u.SourceAddress = bt.d.Name, s
 		} else {
 			u.SourceDomain, u.SourceAddress = d.Name, safe
 		}

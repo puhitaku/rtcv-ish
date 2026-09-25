@@ -19,6 +19,7 @@ export function settingsFixture(): Settings {
     maxInfiniteUnits: 50,
     lockUnits: false,
     freezeMode: 'hard',
+    addressRange: { enabled: false, start: 0, end: 0x400000 },
     nightmare: { algo: 'random', ranges: structuredClone(full) },
     hellgenie: { ranges: structuredClone(full) },
     distortion: { delay: 50 },

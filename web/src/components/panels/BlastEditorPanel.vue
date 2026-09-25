@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import UnitProperties from '@/components/editor/UnitProperties.vue'
-import { COLUMNS, DEFAULT_COLUMNS, type ColumnId } from '@/components/editor/columns'
+import HelpTip from '@/components/ui/HelpTip.vue'
+import { COLUMNS, DEFAULT_COLUMNS, columnHelp, type ColumnId } from '@/components/editor/columns'
+import { FIELD_HELP } from '@/lib/fieldHelp'
 import { SHIFT_FIELDS, parseLayerFile, type ShiftField } from '@/lib/layer'
 import { loadJSON, save as saveLocal } from '@/lib/storage'
 import { useDialogStore } from '@/stores/dialog'
@@ -408,16 +410,31 @@ function onKey(e: KeyboardEvent) {
         tabindex="0"
         @keydown="onKey"
       >
-        <table class="w-full border-collapse text-left whitespace-nowrap" data-testid="be-table">
-          <thead class="sticky top-0 bg-panel text-dim">
+        <table class="be-table w-full border-collapse text-left" data-testid="be-table">
+          <thead class="sticky top-0 z-10 bg-panel text-dim">
             <tr>
               <th class="px-1 font-normal">#</th>
-              <th v-for="c in columns" :key="c.id" class="px-1.5 font-normal">{{ c.label }}</th>
+              <th
+                v-for="c in columns"
+                :key="c.id"
+                class="px-1.5 align-bottom font-normal"
+                :data-testid="`be-th-${c.id}`"
+              >
+                <HelpTip
+                  :text="FIELD_HELP[columnHelp(c.id)]"
+                  class="block"
+                  :style="{ maxWidth: `${c.maxCh}ch` }"
+                >
+                  {{ c.label }}
+                </HelpTip>
+              </th>
+              <!-- Takes the slack so capped columns keep their width. -->
+              <th class="w-full" />
             </tr>
           </thead>
           <tbody>
             <tr v-if="!ed.layer.units.length">
-              <td :colspan="columns.length + 1" class="p-1 text-dim">no units</td>
+              <td :colspan="columns.length + 2" class="p-1 text-dim">no units</td>
             </tr>
             <tr
               v-for="i in shownRows"
@@ -441,11 +458,20 @@ function onKey(e: KeyboardEvent) {
                   :data-testid="`be-row-${c.id}`"
                   @click.stop="toggleFlag(i, c.id)"
                 />
-                <template v-else>{{ c.text(ed.layer.units[i]!) }}</template>
+                <div
+                  v-else
+                  class="be-cell"
+                  :style="{ maxWidth: `${c.maxCh}ch` }"
+                  :title="c.text(ed.layer.units[i]!) || undefined"
+                  :data-testid="`be-cell-${c.id}`"
+                >
+                  {{ c.text(ed.layer.units[i]!) }}
+                </div>
               </td>
+              <td />
             </tr>
             <tr v-if="rows.length > MAX_ROWS">
-              <td :colspan="columns.length + 1" class="p-1 text-dim">
+              <td :colspan="columns.length + 2" class="p-1 text-dim">
                 {{ rows.length - MAX_ROWS }} more rows (use the filter)
               </td>
             </tr>
@@ -456,3 +482,18 @@ function onKey(e: KeyboardEvent) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.be-table td {
+  white-space: nowrap;
+}
+.be-table th {
+  white-space: normal;
+  line-height: 1.2;
+}
+.be-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

@@ -64,6 +64,10 @@ func (s *Session) generate(ctx context.Context, cn *conn) (generated, error) {
 	if err != nil {
 		return generated{}, invalid(err)
 	}
+	if len(l.Units) == 0 && corrupt.AddressRangeMisses(g.settings, g.selected, mem) {
+		r := g.settings.AddressRange
+		s.notify("warn", fmt.Sprintf("Address range 0x%X-0x%X does not fit a unit in any selected domain; nothing was generated", r.Start, r.End))
+	}
 	g.layer = l
 	return g, nil
 }

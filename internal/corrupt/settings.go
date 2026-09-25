@@ -321,6 +321,29 @@ type GameProtectionSettings struct {
 	Keep            int  `json:"keep"`
 }
 
+// AddressRange limits generation to [Start, End) of every selected
+// domain (intersected with the domain) when Enabled.
+type AddressRange struct {
+	Enabled bool  `json:"enabled"`
+	Start   int64 `json:"start"`
+	End     int64 `json:"end"`
+}
+
+// window returns the part of a domain of size bytes that generation may
+// touch: the whole domain, or its intersection with the range.
+func (r AddressRange) window(size uint64) (lo, hi int64) {
+	hi = int64(min(size, math.MaxInt64))
+	if !r.Enabled {
+		return 0, hi
+	}
+	lo = max(r.Start, 0)
+	hi = min(hi, r.End)
+	if hi < lo {
+		hi = lo
+	}
+	return lo, hi
+}
+
 // Settings is the engine configuration (RTCV's CorruptCoreSpec subset).
 type Settings struct {
 	Engine    Engine `json:"engine"`
@@ -334,6 +357,7 @@ type Settings struct {
 	MaxInfiniteUnits int                    `json:"maxInfiniteUnits"`
 	LockUnits        bool                   `json:"lockUnits"`
 	FreezeMode       FreezeMode             `json:"freezeMode"`
+	AddressRange     AddressRange           `json:"addressRange"`
 	Nightmare        NightmareSettings      `json:"nightmare"`
 	Hellgenie        HellgenieSettings      `json:"hellgenie"`
 	Distortion       DistortionSettings     `json:"distortion"`
@@ -369,6 +393,7 @@ func DefaultSettings() *Settings {
 		Precision:        1,
 		MaxInfiniteUnits: 50,
 		FreezeMode:       FreezeHard,
+		AddressRange:     AddressRange{End: 0x400000},
 		Nightmare:        NightmareSettings{Algo: NightmareRandom, Ranges: FullRange()},
 		Hellgenie:        HellgenieSettings{Ranges: FullRange()},
 		Distortion:       DistortionSettings{Delay: 50},
@@ -428,6 +453,12 @@ func (s *Settings) Validate() error {
 	}
 	if !oneOf(s.FreezeMode, FreezeFrame, FreezeScanline, FreezeHard) {
 		add("invalid freezeMode %q", s.FreezeMode)
+	}
+	if s.AddressRange.Start < 0 {
+		add("addressRange start must not be negative")
+	}
+	if s.AddressRange.Start >= s.AddressRange.End {
+		add("addressRange start must be below end")
 	}
 	if !oneOf(s.Nightmare.Algo, NightmareRandom, NightmareRandomTilt, NightmareTilt) {
 		add("invalid nightmare algo %q", s.Nightmare.Algo)

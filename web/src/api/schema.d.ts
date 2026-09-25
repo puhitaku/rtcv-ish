@@ -1252,6 +1252,31 @@ export interface components {
             keep: number;
         };
         /**
+         * @description Limits generation to `[start, end)` intersected with each selected
+         *     domain when `enabled`: unit addresses, store sources and rerolled
+         *     addresses. A domain whose intersection cannot hold one unit gets
+         *     no units; if none can, a blast generates nothing (a `log` event
+         *     says so). `start < end` is required even when disabled. Default
+         *     disabled, `[0, 0x400000)`.
+         */
+        AddressRange: {
+            enabled: boolean;
+            /** Format: int64 */
+            start: number;
+            /**
+             * Format: int64
+             * @description Exclusive.
+             */
+            end: number;
+        };
+        AddressRangePatch: {
+            enabled?: boolean;
+            /** Format: int64 */
+            start?: number;
+            /** Format: int64 */
+            end?: number;
+        };
+        /**
          * @description Defaults: nightmare, intensity 1, errorDelay 1, spread, precision 1,
          *     alignment 0, autoCorrupt false, maxInfiniteUnits 50, lockUnits
          *     false, freezeMode hard; engine parameters as in RTCV (full min/max
@@ -1274,6 +1299,7 @@ export interface components {
             maxInfiniteUnits: number;
             lockUnits: boolean;
             freezeMode: components["schemas"]["FreezeMode"];
+            addressRange: components["schemas"]["AddressRange"];
             nightmare: components["schemas"]["NightmareSettings"];
             hellgenie: components["schemas"]["HellgenieSettings"];
             distortion: components["schemas"]["DistortionSettings"];
@@ -1365,6 +1391,7 @@ export interface components {
             maxInfiniteUnits?: number;
             lockUnits?: boolean;
             freezeMode?: components["schemas"]["FreezeMode"];
+            addressRange?: components["schemas"]["AddressRangePatch"];
             nightmare?: components["schemas"]["NightmareSettingsPatch"];
             hellgenie?: components["schemas"]["HellgenieSettingsPatch"];
             distortion?: components["schemas"]["DistortionSettingsPatch"];

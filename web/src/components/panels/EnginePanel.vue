@@ -4,6 +4,7 @@ import MultiTrackBar from '@/components/ui/MultiTrackBar.vue'
 import NumField from '@/components/ui/NumField.vue'
 import EngineParams from '@/components/engine/EngineParams.vue'
 import DomainsBox from '@/components/engine/DomainsBox.vue'
+import AddressRangeEditor from '@/components/engine/AddressRangeEditor.vue'
 import { useSettingsPatch } from '@/components/engine/useSettingsPatch'
 import { useSettingsStore } from '@/stores/settings'
 import type { Engine, Precision, Settings } from '@/api/types'
@@ -71,6 +72,9 @@ function setPrecision(p: Precision) {
           <option v-for="r in radii" :key="r.id" :value="r.id">{{ r.label }}</option>
         </select>
       </label>
+      <div class="border-t border-line pt-2">
+        <AddressRangeEditor :range="store.settings.addressRange" />
+      </div>
     </BoxPanel>
 
     <BoxPanel title="Corruption Engine">

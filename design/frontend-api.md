@@ -71,6 +71,12 @@ Settings object (persisted in `settings.json`):
   at most. It is resolved at apply time against the emulator's
   `Capabilities`: without `hardUnits` the core uses `scanline`, without
   `scanlineUnits` `frame` (logged once per connection at info level).
+- `addressRange`: `{enabled, start, end}` (default off, `[0, 0x400000)`;
+  `start < end` always required). When enabled, every generated address
+  (units, store sources, reroll) lies in `[start, end)` intersected with
+  its domain; a domain whose intersection cannot hold one unit gets none,
+  and if no selected domain can, the blast generates an empty layer and a
+  `log` event says so.
 - `nightmare`: `{algo: random|randomTilt|tilt, min, max}` (min/max per precision, as in RTCV: `min8,max8,min16,...` or a map keyed by precision)
 - `hellgenie`: `{min, max}` per precision
 - `distortion`: `{delay}`

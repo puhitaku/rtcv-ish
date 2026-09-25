@@ -35,6 +35,7 @@ func defaultSettings() gen.Settings {
 		MaxInfiniteUnits: 50,
 		LockUnits:        false,
 		FreezeMode:       gen.FreezeModeHard,
+		AddressRange:     gen.AddressRange{Enabled: false, Start: 0, End: 0x400000},
 		Nightmare:        gen.NightmareSettings{Algo: gen.NightmareAlgoRandom, Ranges: fullRanges()},
 		Hellgenie:        gen.HellgenieSettings{Ranges: fullRanges()},
 		Distortion:       gen.DistortionSettings{Delay: 50},
@@ -147,6 +148,11 @@ func TestSettingsValidation(t *testing.T) {
 		{"cluster unknown method", `{"cluster":{"method":"shuffle"}}`},
 		{"distortion delay 0", `{"distortion":{"delay":0}}`},
 		{"protection interval 0", `{"gameProtection":{"intervalSeconds":0}}`},
+		{"addressRange start == end", `{"addressRange":{"enabled":true,"start":16,"end":16}}`},
+		{"addressRange start > end", `{"addressRange":{"start":32,"end":16}}`},
+		{"addressRange start > default end", `{"addressRange":{"start":4194305}}`},
+		{"addressRange negative start", `{"addressRange":{"start":-1,"end":16}}`},
+		{"addressRange not a number", `{"addressRange":{"start":"0x10"}}`},
 		{"not JSON", `{`},
 	}
 	for _, tc := range cases {
@@ -199,5 +205,24 @@ func TestSettingsFreezeModeDefault(t *testing.T) {
 	st := e.settings()
 	if st.Engine != gen.EngineFreeze || st.Intensity != 3 || st.FreezeMode != gen.FreezeModeHard {
 		t.Errorf("settings = engine %s intensity %d freezeMode %s", st.Engine, st.Intensity, st.FreezeMode)
+	}
+}
+
+func TestSettingsAddressRange(t *testing.T) {
+	e := newEnv(t, envOptions{noConnect: true})
+	got := e.patchSettings(gen.SettingsPatch{AddressRange: &gen.AddressRangePatch{Enabled: ptr(true), Start: ptr(int64(0x100))}})
+	want := defaultSettings()
+	want.AddressRange = gen.AddressRange{Enabled: true, Start: 0x100, End: 0x400000}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("after patch:\n got %+v\nwant %+v", got, want)
+	}
+	// Moving both bounds in one patch is validated on the merged result.
+	got = e.patchSettings(gen.SettingsPatch{AddressRange: &gen.AddressRangePatch{Start: ptr(int64(0x500000)), End: ptr(int64(0x600000))}})
+	want.AddressRange.Start, want.AddressRange.End = 0x500000, 0x600000
+	if !reflect.DeepEqual(got.AddressRange, want.AddressRange) {
+		t.Errorf("addressRange = %+v, want %+v", got.AddressRange, want.AddressRange)
+	}
+	if got := e.settings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("GET after patch:\n got %+v\nwant %+v", got, want)
 	}
 }

@@ -1400,6 +1400,28 @@ components:
         intervalSeconds: { type: integer, minimum: 1, description: Default 5. }
         keep: { type: integer, minimum: 1, description: Backups kept. Default 10. }
 
+    AddressRange:
+      type: object
+      description: |
+        Limits generation to `[start, end)` intersected with each selected
+        domain when `enabled`: unit addresses, store sources and rerolled
+        addresses. A domain whose intersection cannot hold one unit gets
+        no units; if none can, a blast generates nothing (a `log` event
+        says so). `start < end` is required even when disabled. Default
+        disabled, `[0, 0x400000)`.
+      required: [enabled, start, end]
+      properties:
+        enabled: { type: boolean }
+        start: { type: integer, format: int64, minimum: 0 }
+        end: { type: integer, format: int64, minimum: 1, description: Exclusive. }
+
+    AddressRangePatch:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        start: { type: integer, format: int64, minimum: 0 }
+        end: { type: integer, format: int64, minimum: 1 }
+
     Settings:
       type: object
       description: |
@@ -1407,7 +1429,7 @@ components:
         alignment 0, autoCorrupt false, maxInfiniteUnits 50, lockUnits
         false, freezeMode hard; engine parameters as in RTCV (full min/max
         ranges).
-      required: [engine, intensity, errorDelay, radius, precision, alignment, autoCorrupt, maxInfiniteUnits, lockUnits, freezeMode, nightmare, hellgenie, distortion, vector, cluster, custom, reroll, gameProtection]
+      required: [engine, intensity, errorDelay, radius, precision, alignment, autoCorrupt, maxInfiniteUnits, lockUnits, freezeMode, addressRange, nightmare, hellgenie, distortion, vector, cluster, custom, reroll, gameProtection]
       properties:
         engine: { $ref: "#/components/schemas/Engine" }
         intensity: { type: integer, format: int64, minimum: 1 }
@@ -1419,6 +1441,7 @@ components:
         maxInfiniteUnits: { type: integer, minimum: 1 }
         lockUnits: { type: boolean }
         freezeMode: { $ref: "#/components/schemas/FreezeMode" }
+        addressRange: { $ref: "#/components/schemas/AddressRange" }
         nightmare: { $ref: "#/components/schemas/NightmareSettings" }
         hellgenie: { $ref: "#/components/schemas/HellgenieSettings" }
         distortion: { $ref: "#/components/schemas/DistortionSettings" }
@@ -1530,6 +1553,7 @@ components:
         maxInfiniteUnits: { type: integer, minimum: 1 }
         lockUnits: { type: boolean }
         freezeMode: { $ref: "#/components/schemas/FreezeMode" }
+        addressRange: { $ref: "#/components/schemas/AddressRangePatch" }
         nightmare: { $ref: "#/components/schemas/NightmareSettingsPatch" }
         hellgenie: { $ref: "#/components/schemas/HellgenieSettingsPatch" }
         distortion: { $ref: "#/components/schemas/DistortionSettingsPatch" }

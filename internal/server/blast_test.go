@@ -1,9 +1,11 @@
 package server_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/puhitaku/rtcv-ish/internal/server/gen"
@@ -374,4 +376,30 @@ func TestRerollLayer(t *testing.T) {
 			t.Errorf("reroll scheduled %d units", n)
 		}
 	})
+}
+
+func TestManualBlastAddressRange(t *testing.T) {
+	e := newEnv(t, envOptions{})
+	e.useNightmare(64)
+	e.patchSettings(gen.SettingsPatch{
+		Precision:    ptr(gen.PrecisionN2),
+		AddressRange: &gen.AddressRangePatch{Enabled: ptr(true), Start: ptr(int64(0x101)), End: ptr(int64(0x181))},
+	})
+	layer := e.blast()
+	if len(layer.Units) == 0 {
+		t.Fatal("no units")
+	}
+	for i, u := range layer.Units {
+		if u.Address < 0x101 || u.Address+2 > 0x181 {
+			t.Errorf("unit %d address %#x outside [0x101, 0x181)", i, u.Address)
+		}
+	}
+
+	// A range past the domain generates nothing and says so.
+	events := e.openEvents()
+	e.patchSettings(gen.SettingsPatch{AddressRange: &gen.AddressRangePatch{Start: ptr(int64(vramSize)), End: ptr(int64(2 * vramSize))}})
+	if layer := e.blast(); len(layer.Units) != 0 {
+		t.Fatalf("blast outside the domain returned %d units", len(layer.Units))
+	}
+	events.waitFor(t, "log", func(b json.RawMessage) bool { return strings.Contains(string(b), "Address range") })
 }
