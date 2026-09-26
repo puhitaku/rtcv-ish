@@ -251,9 +251,8 @@ function chk(e: Event) {
         </dd>
       </dl>
       <p class="text-dim">
-        rtcv-ish is an OS-agnostic reimplementation of RTCV (Real-Time Corruptor Vanguard), released
-        under the MIT License. RTCV is © Phil Girard &amp; Daniel Barreiro (MIT); melonDS is
-        GPL-3.0-or-later. See LICENSE in the repository for all third-party notices.
+        rtcv-ish is a multi-OS reimplementation of RTCV (Real-Time Corruptor Vanguard).
+        See LICENSE in the repository for all third-party copyright notices.
       </p>
     </BoxPanel>
   </div>
