@@ -48,6 +48,18 @@ func TestStatusVersion(t *testing.T) {
 	}
 }
 
+func TestStatusVersionInfo(t *testing.T) {
+	if got := newEnv(t, envOptions{noConnect: true}).status().VersionInfo; got.Kind != gen.VersionInfoKindDev {
+		t.Errorf("default versionInfo = %+v, want kind dev", got)
+	}
+	in := server.VersionInfo{Release: "v1.2.3", Commit: "abc1234", Dirty: true, Kind: "release"}
+	got := newEnv(t, envOptions{noConnect: true, verInfo: in}).status().VersionInfo
+	want := gen.VersionInfo{Release: "v1.2.3", Commit: "abc1234", Dirty: true, Kind: gen.VersionInfoKindRelease}
+	if got != want {
+		t.Errorf("versionInfo = %+v, want %+v", got, want)
+	}
+}
+
 // Operations that need an emulator fail with 503 EMULATOR_DISCONNECTED
 // while none is connected; core-only resources keep working.
 func TestDisconnectedErrors(t *testing.T) {

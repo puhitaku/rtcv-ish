@@ -20,13 +20,11 @@ import (
 	"github.com/puhitaku/rtcv-ish/internal/emulators"
 	"github.com/puhitaku/rtcv-ish/internal/logging"
 	"github.com/puhitaku/rtcv-ish/internal/server"
+	"github.com/puhitaku/rtcv-ish/internal/version"
 	"github.com/puhitaku/rtcv-ish/internal/webui"
 )
 
 const shutdownTimeout = 5 * time.Second
-
-// version is set at release build time with -ldflags "-X main.version=...".
-var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -93,7 +91,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := os.MkdirAll(cfg.dataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
-	log.Info("starting", "version", version, "data_dir", cfg.dataDir, "seed", cfg.seed)
+	ver := version.Get()
+	log.Info("starting", "version", ver.String(), "data_dir", cfg.dataDir, "seed", cfg.seed)
 
 	specs, err := launchableEmulators(cfg.melonDS, log)
 	if err != nil {
@@ -105,7 +104,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		Seed:      cfg.seed,
 		Logger:    log,
 		Emulators: specs,
-		Version:   version,
+		Version:   ver.String(),
+		VersionInfo: server.VersionInfo{
+			Release: ver.Release,
+			Commit:  ver.Commit,
+			Dirty:   ver.Dirty,
+			Kind:    ver.Kind,
+		},
 	}, server.WithStatic(webui.FS()))
 	if err != nil {
 		return err

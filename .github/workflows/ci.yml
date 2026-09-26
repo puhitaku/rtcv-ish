@@ -33,6 +33,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: VERSION file
+        run: |
+          if ! grep -qxE 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' VERSION; then
+            echo "::error file=VERSION::VERSION must hold one release tag such as v1.0.0 or v1.0.0-rc1"
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: gofmt

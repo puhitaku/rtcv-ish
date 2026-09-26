@@ -1075,9 +1075,16 @@ components:
 
     Status:
       type: object
-      required: [version, dataDir, connected, unresponsive, address, protectionBackups, blastLayer]
+      required: [version, versionInfo, dataDir, connected, unresponsive, address, protectionBackups, blastLayer]
       properties:
-        version: { type: string, description: Core version. }
+        version:
+          type: string
+          description: >-
+            Core version: `<release> <commit>` for release builds, `<commit>`
+            (with `-dirty` for a modified tree) otherwise; `unknown` stands in
+            for a missing commit.
+          examples: ["v1.0.0-rc1 abc1234", abc1234-dirty]
+        versionInfo: { $ref: "#/components/schemas/VersionInfo" }
         dataDir: { type: string }
         connected: { type: boolean }
         unresponsive:
@@ -1098,6 +1105,15 @@ components:
         busy:
           $ref: "#/components/schemas/BusyStatus"
           description: The core operation currently running, if any.
+
+    VersionInfo:
+      type: object
+      required: [release, commit, dirty, kind]
+      properties:
+        release: { type: string, description: Release tag in the VERSION file., examples: [v1.0.0-rc1] }
+        commit: { type: string, description: Abbreviated VCS revision; empty without VCS info., examples: [abc1234] }
+        dirty: { type: boolean, description: The working tree had uncommitted changes at build time. }
+        kind: { type: string, enum: [release, dev], description: "`release` for tagged release builds, `dev` otherwise." }
 
     BusyStatus:
       type: object

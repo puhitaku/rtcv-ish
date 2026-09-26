@@ -11,12 +11,10 @@ import (
 	"time"
 
 	"github.com/puhitaku/rtcv-ish/internal/emu/fake"
+	"github.com/puhitaku/rtcv-ish/internal/version"
 )
 
 func TestRun(t *testing.T) {
-	defer func(v string) { version = v }(version)
-	version = "test-1"
-
 	emulator, err := fake.New(fake.Options{Manual: true})
 	if err != nil {
 		t.Fatal(err)
@@ -73,11 +71,18 @@ func TestRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var st struct{ Version string }
+	var st struct {
+		Version     string
+		VersionInfo struct{ Release, Commit, Kind string }
+	}
 	err = json.NewDecoder(resp.Body).Decode(&st)
 	resp.Body.Close()
-	if err != nil || st.Version != "test-1" {
-		t.Errorf("GET /api/status: version %q (err %v), want %q", st.Version, err, "test-1")
+	want := version.Get()
+	if err != nil || st.Version != want.String() {
+		t.Errorf("GET /api/status: version %q (err %v), want %q", st.Version, err, want.String())
+	}
+	if vi := st.VersionInfo; vi.Release != want.Release || vi.Commit != want.Commit || vi.Kind != want.Kind {
+		t.Errorf("GET /api/status: versionInfo %+v, want %+v", vi, want)
 	}
 
 	cancel()

@@ -40,6 +40,7 @@ Read `design/architecture.md` first; other design docs are in `design/`.
   fork commits go on branch `rtcv-ish` of the submodule, then bump the
   submodule pointer here.
 - UI: simple, flat, no gradients, light/dark follows the OS.
+- Versioning: the root `VERSION` file holds the next release tag; bump it before tagging (the release workflow checks tag == VERSION). `internal/version` composes the version string from it and the stamped VCS info.
 - Generated code is committed. Regenerate with `scripts/gen.sh`.
 - `make build` builds `web/` then the core with `-tags embedweb`;
   `make build-noweb` skips the frontend. `make test` runs Go tests;

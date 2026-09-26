@@ -7,9 +7,10 @@ import (
 	"slices"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 	"github.com/puhitaku/rtcv-ish/internal/emu"
-	"google.golang.org/protobuf/proto"
 )
 
 // U drives unit scheduler tests on a scratch area with Step.

@@ -1005,8 +1005,13 @@ export interface components {
             code: string;
         };
         Status: {
-            /** @description Core version. */
+            /**
+             * @description Core version: `<release> <commit>` for release builds, `<commit>` (with `-dirty` for a modified tree) otherwise; `unknown` stands in for a missing commit.
+             * @example v1.0.0-rc1 abc1234
+             * @example abc1234-dirty
+             */
             version: string;
+            versionInfo: components["schemas"]["VersionInfo"];
             dataDir: string;
             connected: boolean;
             /** @description The connected emulator did not answer a call in time. Operations fail with `EMULATOR_UNRESPONSIVE` until a ping succeeds; disconnect and quit still work. */
@@ -1022,6 +1027,25 @@ export interface components {
             blastLayer: components["schemas"]["BlastLayerState"];
             /** @description The core operation currently running, if any. */
             busy?: components["schemas"]["BusyStatus"];
+        };
+        VersionInfo: {
+            /**
+             * @description Release tag in the VERSION file.
+             * @example v1.0.0-rc1
+             */
+            release: string;
+            /**
+             * @description Abbreviated VCS revision; empty without VCS info.
+             * @example abc1234
+             */
+            commit: string;
+            /** @description The working tree had uncommitted changes at build time. */
+            dirty: boolean;
+            /**
+             * @description `release` for tagged release builds, `dev` otherwise.
+             * @enum {string}
+             */
+            kind: "release" | "dev";
         };
         BusyStatus: {
             /**

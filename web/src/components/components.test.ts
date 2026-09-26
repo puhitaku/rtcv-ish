@@ -506,6 +506,29 @@ describe('theme setting', () => {
   })
 })
 
+describe('About box', () => {
+  it('shows a development build version', () => {
+    mockFetch({})
+    useStatusStore().set(statusFixture())
+    const w = mount(SettingsPanel)
+    expect(w.find(tid('about-version')).text()).toBe('abc1234-dirty')
+    expect(w.find(tid('about-build-kind')).text()).toBe('development build, uncommitted changes')
+  })
+
+  it('shows a release build version', () => {
+    mockFetch({})
+    useStatusStore().set(
+      statusFixture({
+        version: 'v1.0.0-rc1 abc1234',
+        versionInfo: { release: 'v1.0.0-rc1', commit: 'abc1234', dirty: false, kind: 'release' },
+      }),
+    )
+    const w = mount(SettingsPanel)
+    expect(w.find(tid('about-version')).text()).toBe('v1.0.0-rc1 abc1234')
+    expect(w.find(tid('about-build-kind')).text()).toBe('release build')
+  })
+})
+
 describe('layout', () => {
   it('starts on Harvester without an Engine tab', () => {
     expect(useUiStore().panel).toBe('harvester')

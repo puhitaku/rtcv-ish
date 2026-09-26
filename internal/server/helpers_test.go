@@ -51,6 +51,7 @@ type envOptions struct {
 	fake      fake.Options
 	emulators []server.EmulatorSpec
 	version   string
+	verInfo   server.VersionInfo
 	timeouts  session.Timeouts
 	opts      []server.Option
 }
@@ -89,12 +90,13 @@ func newEnv(t *testing.T, o envOptions) *env {
 
 	log := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug}))
 	srv, err := server.New(t.Context(), server.Config{
-		DataDir:   o.dataDir,
-		Seed:      o.seed,
-		Logger:    log,
-		Emulators: o.emulators,
-		Version:   o.version,
-		Timeouts:  o.timeouts,
+		DataDir:     o.dataDir,
+		Seed:        o.seed,
+		Logger:      log,
+		Emulators:   o.emulators,
+		Version:     o.version,
+		VersionInfo: o.verInfo,
+		Timeouts:    o.timeouts,
 	}, o.opts...)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

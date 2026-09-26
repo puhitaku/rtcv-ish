@@ -33,6 +33,14 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version"
+      - name: Check the VERSION file
+        if: github.ref_type == 'tag'
+        run: |
+          file=$(tr -d '[:space:]' < VERSION)
+          if [[ $GITHUB_REF_NAME != "$file" ]]; then
+            echo "::error file=VERSION::tag $GITHUB_REF_NAME does not match the VERSION file ($file); update VERSION and re-tag"
+            exit 1
+          fi
       - name: Check the changelog section
         if: github.ref_type == 'tag'
         run: ./scripts/changelog-section.sh "$GITHUB_REF_NAME"
@@ -42,7 +50,9 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ needs.version.outputs.version }}
+      # Tag builds are release builds: Status.version is "<VERSION> <commit>".
+      # Other builds report "<commit>" only. VCS info is stamped by go build.
+      LDFLAGS: -s -w${{ github.ref_type == 'tag' && ' -X github.com/puhitaku/rtcv-ish/internal/version.kind=release' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -64,12 +74,13 @@ jobs:
         run: |
           build() {
             CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" -o "bin/$1-$2/$3" ./cmd/rtcv-ish
+              -ldflags "$LDFLAGS" -o "bin/$1-$2/$3" ./cmd/rtcv-ish
           }
           build linux amd64 rtcv-ish
           build darwin amd64 rtcv-ish
           build darwin arm64 rtcv-ish
           build windows amd64 rtcv-ish.exe
+          go version -m bin/linux-amd64/rtcv-ish | grep -E 'vcs\.|-ldflags'
           tar -cf core.tar -C bin .
           tar -tvf core.tar
       - uses: actions/upload-artifact@v7

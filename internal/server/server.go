@@ -20,6 +20,9 @@ import (
 // EmulatorSpec is a bundled emulator the core can launch.
 type EmulatorSpec = session.EmulatorSpec
 
+// VersionInfo is reported in Status.versionInfo.
+type VersionInfo = session.VersionInfo
+
 type Config struct {
 	DataDir   string
 	Seed      int64
@@ -27,6 +30,9 @@ type Config struct {
 	Emulators []EmulatorSpec
 	// Version is reported in Status.version; empty means "dev".
 	Version string
+	// VersionInfo is reported in Status.versionInfo; an empty Kind means
+	// "dev".
+	VersionInfo VersionInfo
 	// Timeouts tunes emulator call and operation timeouts; zero fields
 	// use the defaults.
 	Timeouts session.Timeouts
@@ -60,14 +66,18 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Server, error) {
 	if cfg.Version == "" {
 		cfg.Version = "dev"
 	}
+	if cfg.VersionInfo.Kind == "" {
+		cfg.VersionInfo.Kind = "dev"
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	sess, err := session.New(ctx, session.Config{
-		DataDir:   cfg.DataDir,
-		Seed:      cfg.Seed,
-		Logger:    cfg.Logger,
-		Emulators: cfg.Emulators,
-		Version:   cfg.Version,
-		Timeouts:  cfg.Timeouts,
+		DataDir:     cfg.DataDir,
+		Seed:        cfg.Seed,
+		Logger:      cfg.Logger,
+		Emulators:   cfg.Emulators,
+		Version:     cfg.Version,
+		VersionInfo: cfg.VersionInfo,
+		Timeouts:    cfg.Timeouts,
 	})
 	if err != nil {
 		cancel()

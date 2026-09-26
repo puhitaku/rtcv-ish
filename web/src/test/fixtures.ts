@@ -62,7 +62,8 @@ export function settingsFixture(): Settings {
 
 export function statusFixture(over: Partial<Status> = {}): Status {
   return {
-    version: 'test',
+    version: 'abc1234-dirty',
+    versionInfo: { release: 'v1.0.0-rc1', commit: 'abc1234', dirty: true, kind: 'dev' },
     dataDir: '/tmp/data',
     connected: true,
     unresponsive: false,

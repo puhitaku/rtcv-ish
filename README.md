@@ -43,6 +43,7 @@ Core flags:
 Requires Go 1.26 and Node. Run `make build` to build the core into `bin/`.
 The melonDS fork is the `emulators/melonds` submodule (branch `rtcv-ish`);
 build it with CMake as described in its `BUILD.md`.
+Local builds report their commit (`abc1234`, or `abc1234-dirty` for a modified tree) as the version; tagged release builds report `<VERSION file> <commit>`.
 
 See also: [the GitHub actions pipeline](.github/workflows/release.yml)
 

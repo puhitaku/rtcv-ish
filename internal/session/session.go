@@ -84,7 +84,17 @@ type Config struct {
 	Logger    *slog.Logger
 	Emulators []EmulatorSpec
 	Version   string
-	Timeouts  Timeouts
+	// VersionInfo is reported in Status.versionInfo.
+	VersionInfo VersionInfo
+	Timeouts    Timeouts
+}
+
+// VersionInfo is the pieces Status.version is composed of.
+type VersionInfo struct {
+	Release string `json:"release"`
+	Commit  string `json:"commit"`
+	Dirty   bool   `json:"dirty"`
+	Kind    string `json:"kind"`
 }
 
 type Session struct {
@@ -282,12 +292,13 @@ const (
 )
 
 type Status struct {
-	Version   string        `json:"version"`
-	DataDir   string        `json:"dataDir"`
-	Connected bool          `json:"connected"`
-	Address   string        `json:"address"`
-	Emulator  *EmulatorInfo `json:"emulator,omitempty"`
-	Game      *GameStatus   `json:"game,omitempty"`
+	Version     string        `json:"version"`
+	VersionInfo VersionInfo   `json:"versionInfo"`
+	DataDir     string        `json:"dataDir"`
+	Connected   bool          `json:"connected"`
+	Address     string        `json:"address"`
+	Emulator    *EmulatorInfo `json:"emulator,omitempty"`
+	Game        *GameStatus   `json:"game,omitempty"`
 	// Unresponsive is set while the connected emulator does not answer.
 	Unresponsive      bool            `json:"unresponsive"`
 	ProtectionBackups int             `json:"protectionBackups"`
@@ -384,6 +395,7 @@ func (s *Session) Status() Status {
 func (s *Session) statusLocked() *Status {
 	st := &Status{
 		Version:           s.cfg.Version,
+		VersionInfo:       s.cfg.VersionInfo,
 		DataDir:           s.cfg.DataDir,
 		ProtectionBackups: s.store.BackupCount(),
 		BlastLayer:        BlastLayerState{Available: s.blLayer != nil, On: s.blLayer != nil && s.blOn},

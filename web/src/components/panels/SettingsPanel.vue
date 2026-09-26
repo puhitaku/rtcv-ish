@@ -46,6 +46,12 @@ async function onFile(e: Event) {
 }
 
 const emu = computed(() => st.status?.emulator)
+const buildKind = computed(() => {
+  const v = st.status?.versionInfo
+  if (!v) return ''
+  if (v.kind === 'release') return 'release build'
+  return v.dirty ? 'development build, uncommitted changes' : 'development build'
+})
 function chk(e: Event) {
   return (e.target as HTMLInputElement).checked
 }
@@ -216,8 +222,13 @@ function chk(e: Event) {
 
     <BoxPanel title="About">
       <dl class="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5">
-        <dt class="lbl">Core version</dt>
-        <dd class="font-mono" data-testid="about-version">{{ st.status?.version ?? '?' }}</dd>
+        <dt class="lbl">Version</dt>
+        <dd>
+          <span class="font-mono" data-testid="about-version">{{ st.status?.version ?? '?' }}</span>
+          <span v-if="buildKind" class="block text-xs text-dim" data-testid="about-build-kind">
+            {{ buildKind }}
+          </span>
+        </dd>
         <dt class="lbl">Data directory</dt>
         <dd class="font-mono break-all" data-testid="about-data-dir">
           {{ st.status?.dataDir ?? '?' }}

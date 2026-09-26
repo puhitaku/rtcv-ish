@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	emulatorv1 "github.com/puhitaku/rtcv-ish/api/emulator/v1"
 	"github.com/puhitaku/rtcv-ish/internal/emu"
 	"github.com/puhitaku/rtcv-ish/internal/emu/fake"
 	"github.com/puhitaku/rtcv-ish/internal/emutest"
-	"google.golang.org/protobuf/proto"
 )
 
 func startFake(t *testing.T, opts fake.Options) *fake.Server {
