@@ -1,7 +1,8 @@
 /bin/
 /data/
 web/node_modules/
-internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
 web/test-results/
 web/playwright-report/
 .claude/

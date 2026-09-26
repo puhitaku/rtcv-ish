@@ -1,7 +1,7 @@
 # rtcv-ish web frontend
 
 Vue 3 + TypeScript + Pinia + Tailwind, built with Vite into `../internal/webui/dist`
-(embedded into `rtcv-ish` when built with `-tags embedweb`).
+(embedded into `rtcv-ish` by the next `go build`).
 
 - `npm run dev`: dev server; `/api` is proxied to `http://127.0.0.1:8420` (run `rtcv-ish` there).
 - `npm run build`: type-check and build into `../internal/webui/dist`.

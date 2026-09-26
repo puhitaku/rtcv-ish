@@ -128,14 +128,10 @@ export default async function globalSetup() {
   if (!process.env.E2E_SKIP_WEB_BUILD) {
     execFileSync('npx', ['vite', 'build'], { cwd: webDir, stdio: 'inherit' })
   }
-  execFileSync(
-    'go',
-    ['build', '-tags', 'embedweb', '-o', join(bin, 'rtcv-ish'), './cmd/rtcv-ish'],
-    {
-      cwd: repoRoot,
-      stdio: 'inherit',
-    },
-  )
+  execFileSync('go', ['build', '-o', join(bin, 'rtcv-ish'), './cmd/rtcv-ish'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  })
   if (!melonDS) {
     execFileSync('go', ['build', '-o', join(bin, 'rtcv-ish-fakeemu'), './cmd/rtcv-ish-fakeemu'], {
       cwd: repoRoot,

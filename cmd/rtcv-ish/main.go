@@ -99,6 +99,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	var opts []server.Option
+	if webui.Present() {
+		opts = append(opts, server.WithStatic(webui.FS()))
+	}
 	core, err := server.New(ctx, server.Config{
 		DataDir:   cfg.dataDir,
 		Seed:      cfg.seed,
@@ -111,7 +115,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Dirty:   ver.Dirty,
 			Kind:    ver.Kind,
 		},
-	}, server.WithStatic(webui.FS()))
+	}, opts...)
 	if err != nil {
 		return err
 	}

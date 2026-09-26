@@ -130,8 +130,23 @@ func (s *Server) Handler() http.Handler {
 	return logRequests(s.log, mux)
 }
 
-// staticHandler serves the web frontend. Unknown paths get index.html so
-// that client-side routes work.
+// placeholderPage is served at "/" when no web frontend is configured.
+const placeholderPage = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rtcv-ish</title>
+</head>
+<body>
+<h1>rtcv-ish</h1>
+<p>The web frontend was not built into this executable. Run <code>make build</code> (or <code>cd web &amp;&amp; npm run build</code> then <code>go build</code>).</p>
+<p>The API is available under <a href="/api/status">/api</a>.</p>
+</body>
+</html>
+`
+
+// staticHandler serves the web frontend, or placeholderPage without one.
+// Unknown frontend paths get index.html so that client-side routes work.
 func (s *Server) staticHandler() http.Handler {
 	if s.static != nil {
 		fsys := s.static
@@ -153,8 +168,8 @@ func (s *Server) staticHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "rtcv-ish: web frontend not embedded\n")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, placeholderPage)
 	})
 }
 

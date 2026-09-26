@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"image/png"
+	"io"
 	"net"
 	"net/http"
 	"os/exec"
@@ -354,6 +355,29 @@ func TestLaunch(t *testing.T) {
 	expectStatus(t, rq, err, http.StatusNoContent)
 	if e.status().Connected {
 		t.Error("connected after quit")
+	}
+}
+
+func TestPlaceholderWithoutFrontend(t *testing.T) {
+	e := newEnv(t, envOptions{noConnect: true})
+	resp, err := e.http.Client().Get(e.http.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") ||
+		!strings.Contains(string(body), "was not built into this executable") {
+		t.Errorf("GET / = %d %q %q", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+
+	resp, err = e.http.Client().Get(e.http.URL + "/some/route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /some/route = %d, want 404", resp.StatusCode)
 	}
 }
 

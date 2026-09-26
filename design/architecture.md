@@ -79,7 +79,7 @@ rtcv-ish/
     stockpile/           stash keys, stash history, stockpile files
     session/             coordinator: settings, emulator lifecycle, auto-corrupt, harvester ops
     server/              HTTP server: generated OpenAPI code, handlers, SSE
-    webui/               embeds web/dist into the executable (build tag embedweb)
+    webui/               embeds the built frontend (internal/webui/dist) into the executable
   sdk/cpp/               C++ emulator SDK (vendored into emulator forks)
   web/                   Vue frontend (Vite, Pinia, Tailwind, Vitest, Playwright)
   emulators/melonds/     git submodule: melonDS fork, branch rtcv-ish

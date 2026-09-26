@@ -10,7 +10,7 @@ Read `design/architecture.md` first; other design docs are in `design/`.
   `internal/*` core packages (see `design/architecture.md`): `emu` client,
   `emu/fake`, `corrupt` engines, `stockpile` storage, `session`
   coordinator, `server` HTTP + generated `gen/`, `webui` embedded frontend
-  (build tag `embedweb`).
+  (`internal/webui/dist`, placeholder page when not built).
 - `api/emulator/v1/emulator.proto` emulator API (semantics in
   `design/emulator-api.md`). `api/frontend/openapi.yaml` frontend API.
 - `sdk/cpp` C++ emulator SDK, copied verbatim into emulator forks.
@@ -42,7 +42,8 @@ Read `design/architecture.md` first; other design docs are in `design/`.
 - UI: simple, flat, no gradients, light/dark follows the OS.
 - Versioning: the root `VERSION` file holds the next release tag; bump it before tagging (the release workflow checks tag == VERSION). `internal/version` composes the version string from it and the stamped VCS info.
 - Generated code is committed. Regenerate with `scripts/gen.sh`.
-- `make build` builds `web/` then the core with `-tags embedweb`;
-  `make build-noweb` skips the frontend. `make test` runs Go tests;
+- `make build` builds `web/` then the core, embedding the frontend;
+  `make build-noweb` (or a plain `go build`) skips the frontend and the
+  core serves a placeholder page. `make test` runs Go tests;
   `make test-e2e` needs `RTCVISH_MELONDS`. Frontend: `cd web && npm test`,
   `npm run test:e2e`.
