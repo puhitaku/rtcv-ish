@@ -1,11 +1,13 @@
 # rtcv-ish
 
-rtcv-ish is an OS-agnostic reimplementation of
+rtcv-ish is a multi-OS reimplementation of
 [RTCV (Real-Time Corruptor Vanguard)](https://github.com/redscientistlabs/RTCV)
 for Windows, macOS and Linux. A Go core server with a web frontend controls
-emulators (currently melonDS, a Nintendo DS emulator) over a small TCP API
-to corrupt game memory in real time. It is a hacker's tool and is not
-affiliated with the RTCV authors.
+emulators (currently supports only melonDS) over a small TCP API
+to corrupt game memory in real time.
+
+rtcv-ish is a spiritual fork of RTCV. Shout out to the RTCV's original authors.
+
 
 ## Install
 
@@ -14,16 +16,12 @@ Download the archive for your OS from the
 The archive contains the `rtcv-ish` executable and the bundled emulator under
 `emulators/`.
 
-You must provide your own ROMs. BIOS/firmware files are optional for homebrew
-(melonDS ships a free BIOS) but needed for commercial games; configure them in
-melonDS as usual.
 
 ## Use
 
 1. Run `rtcv-ish` (double-click it or start it from a terminal).
 2. Open the printed URL (default http://127.0.0.1:8420) in a browser.
-3. Click Launch to start the bundled melonDS. Alternatively, start melonDS
-   yourself with `--rtcvish-listen 127.0.0.1:42069` and click Connect.
+3. Click Launch to start a bundled emulator.
 4. Load a ROM.
 5. Corrupt with Manual Blast or Auto-Corrupt. Tune the engine in the Engine
    panel, and use the Glitch Harvester for savestates, stash and stockpiles.
@@ -39,13 +37,17 @@ Core flags:
 | `--log-format` | `auto` | Log format: `auto`, `text` or `json` |
 | `--melonds` | `$RTCVISH_MELONDS` | melonDS executable or `.app` bundle to launch. Without it, the bundled `emulators/melonds/` next to the executable is used, then the newest `emulators/melonds/build/*/` when run from the repository |
 
+
 ## Build from source
 
 Requires Go 1.26 and Node. Run `make build` to build the core into `bin/`.
 The melonDS fork is the `emulators/melonds` submodule (branch `rtcv-ish`);
 build it with CMake as described in its `BUILD.md`.
 
+See also: [the GitHub actions pipeline](.github/workflows/release.yml)
+
+
 ## License
 
 rtcv-ish is released under the MIT License. See [LICENSE](LICENSE) for the
-referenced projects (RTCV, melonDS, nanopb) and their licenses.
+referenced projects (RTCV, melonDS, etc.) and their licenses.
