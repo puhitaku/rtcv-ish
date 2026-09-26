@@ -1,4 +1,8 @@
-# rtcv-ish
+<div align="center">
+  <h1>rtcv-ish</h1>
+  <p><img width=400px src="./screenshot.avif" alt="rtcv-ish's screenshot"></p>
+</div>
+
 
 rtcv-ish is a multi-OS reimplementation of
 [RTCV (Real-Time Corruptor Vanguard)](https://github.com/redscientistlabs/RTCV)
