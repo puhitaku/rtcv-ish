@@ -6,3 +6,5 @@ web/test-results/
 web/playwright-report/
 .claude/
 test/roms/
+*.sks
+*.bl
