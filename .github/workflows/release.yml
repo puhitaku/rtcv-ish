@@ -62,25 +62,36 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Build the web frontend
-        if: hashFiles('web/package.json') != ''
         working-directory: web
         run: |
           npm ci
           npm run build
+          test -f ../internal/webui/dist/index.html
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Build
         run: |
           build() {
-            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath \
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -tags embedweb \
               -ldflags "$LDFLAGS" -o "bin/$1-$2/$3" ./cmd/rtcv-ish
           }
           build linux amd64 rtcv-ish
           build darwin amd64 rtcv-ish
           build darwin arm64 rtcv-ish
           build windows amd64 rtcv-ish.exe
-          go version -m bin/linux-amd64/rtcv-ish | grep -E 'vcs\.|-ldflags'
+          go version -m bin/linux-amd64/rtcv-ish | grep -E 'vcs\.|-ldflags|-tags'
+      - name: Check the embedded frontend
+        run: |
+          bin/linux-amd64/rtcv-ish --listen 127.0.0.1:18420 --data-dir /tmp/rtcvish-check &
+          pid=$!
+          for i in $(seq 1 50); do curl -sf http://127.0.0.1:18420/ > index.html && break; sleep 0.2; done
+          kill $pid
+          if grep -q "was not built into this executable" index.html; then
+            echo "::error::the web frontend is not embedded in rtcv-ish"
+            exit 1
+          fi
+          grep -q '<div id="app"' index.html
           tar -cf core.tar -C bin .
           tar -tvf core.tar
       - uses: actions/upload-artifact@v7
